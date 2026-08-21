@@ -1,5 +1,7 @@
 {
   "compilerOptions": {
+    "ignoreDeprecations": "6.0",
+    "forceConsistentCasingInFileNames": true,
     "target": "ES2017",
     "lib": [ "dom", "dom.iterable", "esnext" ],
     "allowJs": true,
