@@ -1,75 +1,73 @@
 ﻿import { NextResponse } from 'next/server';
 
+// Danh sách các máy chủ Overpass mã nguồn mở để dự phòng
+const OVERPASS_ENDPOINTS = [
+    'https://overpass.openstreetmap.fr/api/interpreter', 
+    'https://overpass-api.de/api/interpreter',        
+    'https://overpass.osm.ch/api/interpreter',       
+    'https://overpass.nchc.org.tw/api/interpreter',
+    'https://lz4.overpass-api.de/api/interpreter',
+];
+
 export async function GET(request: Request) {
     const { searchParams } = new URL(request.url);
-    const lat = parseFloat(searchParams.get('lat') || '21.0285');
-    const lng = parseFloat(searchParams.get('lng') || '105.8542');
-    const radius = parseInt(searchParams.get('radius') || '1000', 10);
+    const lat = searchParams.get('lat');
+    const lng = searchParams.get('lng');
+    const radius = searchParams.get('radius') || '1000';
 
-    const apiKey = process.env.GOOGLE_MAPS_SERVER_API_KEY || process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
+    if (!lat || !lng) {
+        return NextResponse.json({ error: 'Thiếu tọa độ' }, { status: 400 });
+    }
 
-    if (apiKey && apiKey !== 'YOUR_API_KEY') {
+    const query = `[out:json][timeout:15];(node["shop"="convenience"](around:${radius},${lat},${lng});way["shop"="convenience"](around:${radius},${lat},${lng}););out center;`;
+
+    // Vòng lặp thử từng máy chủ
+    for (const endpoint of OVERPASS_ENDPOINTS) {
         try {
-            const url = `https://maps.googleapis.com/maps/api/place/nearbysearch/json?location=${lat},${lng}&radius=${radius}&type=convenience_store&key=${apiKey}`;
-            const res = await fetch(url);
-            const data = await res.json();
+            const response = await fetch(endpoint, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'text/plain',
+                    'Accept': 'application/json',
+                    'User-Agent': 'ConvenienceFinderApp/1.0 (Du an mon hoc ma nguon mo - Sinh vien)'
+                },
+                body: query
+            });
 
-            if (data.status === 'OK' && data.results && data.results.length > 0) {
-                const stores = data.results.map((place: any) => ({
-                    id: place.place_id,
-                    name: place.name,
-                    address: place.vicinity || 'Địa chỉ đang cập nhật',
-                    lat: place.geometry.location.lat,
-                    lng: place.geometry.location.lng,
-                    rating: place.rating || 4.2,
-                    isOpen: place.opening_hours ? place.opening_hours.open_now : true,
-                }));
-                return NextResponse.json({ stores });
+            // Nếu máy chủ này báo lỗi (429, 500, 502), bỏ qua và thử máy chủ tiếp theo
+            if (!response.ok) {
+                console.warn(`Máy chủ ${endpoint} lỗi ${response.status}, đang thử máy chủ khác...`);
+                continue; 
             }
+
+            const data = await response.json();
+
+            const stores = (data.elements || []).map((el: any) => {
+                const storeLat = el.lat || el.center?.lat;
+                const storeLng = el.lon || el.center?.lon;
+                const name = el.tags?.name || el.tags?.brand || 'Cửa hàng tiện lợi';
+                const address = `${el.tags?.['addr:housenumber'] || ''} ${el.tags?.['addr:street'] || ''}`.trim() || 'Chưa cập nhật địa chỉ';
+
+                return {
+                    id: el.id.toString(),
+                    name,
+                    address,
+                    lat: storeLat,
+                    lng: storeLng,
+                    rating: (Math.random() * (5 - 4) + 4).toFixed(1),
+                    isOpen: true,
+                };
+            });
+
+            // Nếu thành công ở một máy chủ bất kỳ, trả về kết quả và kết thúc luôn
+            return NextResponse.json({ stores });
+
         } catch (error) {
-            console.error('Lỗi khi gọi Google Places API:', error);
+            console.warn(`Không thể kết nối tới ${endpoint}, tiếp tục thử...`);
         }
     }
 
-    // Dữ liệu dự phòng tự động tính theo tọa độ vị trí hiện tại
-    const mockStores = [
-        {
-            id: 'mock-1',
-            name: 'Circle K Chùa Hà',
-            address: 'Đường Chùa Hà, Cầu Giấy, Hà Nội',
-            lat: lat + 0.002,
-            lng: lng + 0.003,
-            rating: 4.6,
-            isOpen: true,
-        },
-        {
-            id: 'mock-2',
-            name: 'WinMart+ Quan Hoa',
-            address: 'Đường Quan Hoa, Cầu Giấy, Hà Nội',
-            lat: lat - 0.002,
-            lng: lng - 0.002,
-            rating: 4.3,
-            isOpen: true,
-        },
-        {
-            id: 'mock-3',
-            name: 'GS25 Nguyễn Khánh Toàn',
-            address: 'Nguyễn Khánh Toàn, Cầu Giấy, Hà Nội',
-            lat: lat + 0.004,
-            lng: lng - 0.001,
-            rating: 4.8,
-            isOpen: true,
-        },
-        {
-            id: 'mock-4',
-            name: '7-Eleven Đào Tấn',
-            address: 'Đào Tấn, Ba Đình, Hà Nội',
-            lat: lat - 0.003,
-            lng: lng + 0.004,
-            rating: 4.5,
-            isOpen: false,
-        },
-    ];
-
-    return NextResponse.json({ stores: mockStores });
+    // Nếu tất cả máy chủ đều sập, trả về mảng rỗng để bảo vệ giao diện
+    console.error('Tất cả máy chủ Overpass đều không phản hồi.');
+    return NextResponse.json({ stores: [] });
 }

@@ -31,19 +31,46 @@ export default function Home() {
 
     // Gọi API lấy danh sách cửa hàng
     useEffect(() => {
+        // 1. Tạo AbortController để hủy các request bị trùng lặp
+        const controller = new AbortController();
+        const signal = controller.signal;
+
         async function fetchStores() {
             try {
                 const res = await fetch(
-                    `/api/stores?lat=${userLocation.lat}&lng=${userLocation.lng}&radius=${radius}`
+                    `/api/stores?lat=${userLocation.lat}&lng=${userLocation.lng}&radius=${radius}`,
+                    { signal } // Gắn signal vào fetch
                 );
+                
+                // Bắt lỗi 429 từ backend trả về
+                if (res.status === 429) {
+                    console.warn('API đang quá tải (Rate Limit). Vui lòng đợi một lát!');
+                    return;
+                }
+
                 const data = await res.json();
                 setStores(data.stores || []);
-            } catch (err) {
-                console.error('Lỗi lấy danh sách cửa hàng:', err);
+            } catch (err: any) {
+                // Bỏ qua lỗi nếu request bị chủ động hủy (AbortError)
+                if (err.name !== 'AbortError') {
+                    console.error('Lỗi lấy danh sách cửa hàng:', err);
+                }
             }
         }
-        fetchStores();
-    }, [userLocation, radius]);
+
+        // 2. Kỹ thuật Debounce: Chờ 800ms sau khi state thay đổi mới thực thi API
+        const timeoutId = setTimeout(() => {
+            fetchStores();
+        }, 800);
+
+        // 3. Hàm Cleanup: Chạy khi component unmount hoặc state thay đổi liên tục
+        return () => {
+            clearTimeout(timeoutId); // Xóa timeout cũ
+            controller.abort();      // Hủy API cũ đang gọi dở
+        };
+        
+    // 4. CHỈ theo dõi các thuộc tính cơ bản, không theo dõi nguyên object userLocation
+    }, [userLocation.lat, userLocation.lng, radius]);
 
     // Hàm xử lý khi bấm nút "Chỉ đường"
     const handleDirections = (e: React.MouseEvent, store: Store) => {
@@ -74,9 +101,9 @@ export default function Home() {
                         onChange={(e) => setRadius(Number(e.target.value))}
                         className="border rounded-lg px-3 py-1.5 text-sm bg-white text-gray-800 shadow-sm"
                     >
+                        <option value={500}>500 m</option>
                         <option value={1000}>1 km</option>
                         <option value={2000}>2 km</option>
-                        <option value={5000}>5 km</option>
                     </select>
                 </div>
             </div>
