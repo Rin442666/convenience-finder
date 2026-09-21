@@ -1,0 +1,115 @@
+USE ConvenienceFinder;
+GO
+
+CREATE TABLE Roles (
+    Id INT IDENTITY(1,1) PRIMARY KEY,
+    Name NVARCHAR(50) NOT NULL UNIQUE,
+    CreatedAt DATETIME2 NOT NULL DEFAULT GETDATE()
+);
+
+CREATE TABLE Users (
+    Id INT IDENTITY(1,1) PRIMARY KEY,
+    FullName NVARCHAR(200) NOT NULL,
+    Email NVARCHAR(200) NOT NULL UNIQUE,
+    PasswordHash NVARCHAR(255) NOT NULL,
+    RoleId INT NOT NULL,
+    IsActive BIT NOT NULL DEFAULT 1,
+    CreatedAt DATETIME2 NOT NULL DEFAULT GETDATE(),
+    CONSTRAINT FK_Users_Roles FOREIGN KEY (RoleId) REFERENCES Roles(Id)
+);
+
+CREATE TABLE Brands (
+    Id INT IDENTITY(1,1) PRIMARY KEY,
+    Slug NVARCHAR(100) NOT NULL UNIQUE,
+    Name NVARCHAR(200) NOT NULL UNIQUE,
+    LogoUrl NVARCHAR(500) NULL,
+    CreatedAt DATETIME2 NOT NULL DEFAULT GETDATE()
+);
+
+CREATE TABLE Amenities (
+    Id INT IDENTITY(1,1) PRIMARY KEY,
+    Slug NVARCHAR(100) NOT NULL UNIQUE,
+    Name NVARCHAR(200) NOT NULL UNIQUE,
+    CreatedAt DATETIME2 NOT NULL DEFAULT GETDATE()
+);
+
+CREATE TABLE Stores (
+    Id INT IDENTITY(1,1) PRIMARY KEY,
+    BrandId INT NULL,
+    Name NVARCHAR(200) NOT NULL,
+    Address NVARCHAR(500) NOT NULL,
+    Latitude DECIMAL(10,7) NOT NULL,
+    Longitude DECIMAL(10,7) NOT NULL,
+    Rating DECIMAL(3,1) NOT NULL DEFAULT 0,
+    IsOpen BIT NOT NULL DEFAULT 1,
+    Is24h BIT NOT NULL DEFAULT 0,
+    OpenHours NVARCHAR(100) NULL,
+    Status NVARCHAR(50) NOT NULL DEFAULT 'ACTIVE',
+    CreatedByUserId INT NULL,
+    CreatedAt DATETIME2 NOT NULL DEFAULT GETDATE(),
+    CONSTRAINT FK_Stores_Brands FOREIGN KEY (BrandId) REFERENCES Brands(Id),
+    CONSTRAINT FK_Stores_Users FOREIGN KEY (CreatedByUserId) REFERENCES Users(Id)
+);
+
+CREATE TABLE StoreAmenities (
+    StoreId INT NOT NULL,
+    AmenityId INT NOT NULL,
+    PRIMARY KEY (StoreId, AmenityId),
+    CONSTRAINT FK_StoreAmenities_Stores FOREIGN KEY (StoreId) REFERENCES Stores(Id),
+    CONSTRAINT FK_StoreAmenities_Amenities FOREIGN KEY (AmenityId) REFERENCES Amenities(Id)
+);
+
+CREATE TABLE StoreRequests (
+    Id INT IDENTITY(1,1) PRIMARY KEY,
+    SubmittedByUserId INT NOT NULL,
+    StoreName NVARCHAR(200) NOT NULL,
+    BrandName NVARCHAR(200) NULL,
+    Address NVARCHAR(500) NOT NULL,
+    Latitude DECIMAL(10,7) NOT NULL,
+    Longitude DECIMAL(10,7) NOT NULL,
+    Notes NVARCHAR(1000) NULL,
+    Status NVARCHAR(20) NOT NULL DEFAULT 'PENDING',
+    CreatedAt DATETIME2 NOT NULL DEFAULT GETDATE(),
+    CONSTRAINT FK_StoreRequests_Users FOREIGN KEY (SubmittedByUserId) REFERENCES Users(Id)
+);
+
+CREATE TABLE Reviews (
+    Id INT IDENTITY(1,1) PRIMARY KEY,
+    StoreId INT NOT NULL,
+    UserId INT NOT NULL,
+    Rating DECIMAL(3,1) NOT NULL CHECK (Rating >= 1 AND Rating <= 5),
+    ReviewText NVARCHAR(1000) NULL,
+    CreatedAt DATETIME2 NOT NULL DEFAULT GETDATE(),
+    CONSTRAINT FK_Reviews_Stores FOREIGN KEY (StoreId) REFERENCES Stores(Id),
+    CONSTRAINT FK_Reviews_Users FOREIGN KEY (UserId) REFERENCES Users(Id)
+);
+
+CREATE TABLE Favorites (
+    Id INT IDENTITY(1,1) PRIMARY KEY,
+    UserId INT NOT NULL,
+    StoreId INT NOT NULL,
+    CreatedAt DATETIME2 NOT NULL DEFAULT GETDATE(),
+    CONSTRAINT FK_Favorites_Users FOREIGN KEY (UserId) REFERENCES Users(Id),
+    CONSTRAINT FK_Favorites_Stores FOREIGN KEY (StoreId) REFERENCES Stores(Id),
+    CONSTRAINT UNIQUE_Favorites UNIQUE (UserId, StoreId)
+);
+
+CREATE TABLE RoutePaths (
+    Id INT IDENTITY(1,1) PRIMARY KEY,
+    UserId INT NULL,
+    StoreId INT NULL,
+    StartLat DECIMAL(10,7) NOT NULL,
+    StartLng DECIMAL(10,7) NOT NULL,
+    EndLat DECIMAL(10,7) NOT NULL,
+    EndLng DECIMAL(10,7) NOT NULL,
+    PolylineJson NVARCHAR(MAX) NULL,
+    CreatedAt DATETIME2 NOT NULL DEFAULT GETDATE(),
+    CONSTRAINT FK_RoutePaths_Users FOREIGN KEY (UserId) REFERENCES Users(Id),
+    CONSTRAINT FK_RoutePaths_Stores FOREIGN KEY (StoreId) REFERENCES Stores(Id)
+);
+
+CREATE INDEX IX_Stores_Location ON Stores (Latitude, Longitude);
+CREATE INDEX IX_Stores_BrandId ON Stores (BrandId);
+CREATE INDEX IX_Users_Email ON Users (Email);
+CREATE INDEX IX_StoreRequests_Status ON StoreRequests (Status);
+CREATE INDEX IX_Reviews_StoreId ON Reviews (StoreId);

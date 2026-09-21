@@ -1,73 +1,92 @@
 ﻿import { NextResponse } from 'next/server';
+import { getStoreCatalog, getStoreCatalogFromDatabase, queryStores, queryStoresFromDatabase } from '@/lib/store-db';
 
-// Danh sách các máy chủ Overpass mã nguồn mở để dự phòng
-const OVERPASS_ENDPOINTS = [
-    'https://overpass.openstreetmap.fr/api/interpreter', 
-    'https://overpass-api.de/api/interpreter',        
-    'https://overpass.osm.ch/api/interpreter',       
-    'https://overpass.nchc.org.tw/api/interpreter',
-    'https://lz4.overpass-api.de/api/interpreter',
-];
+function parseArrayParam(value: string | null): string[] {
+    if (!value) {
+        return [];
+    }
+
+    return value
+        .split(',')
+        .map((item) => item.trim())
+        .filter(Boolean);
+}
 
 export async function GET(request: Request) {
     const { searchParams } = new URL(request.url);
-    const lat = searchParams.get('lat');
-    const lng = searchParams.get('lng');
-    const radius = searchParams.get('radius') || '1000';
+    const lat = parseFloat(searchParams.get('lat') || '21.03477');
+    const lng = parseFloat(searchParams.get('lng') || '105.80266');
+    const radius = parseInt(searchParams.get('radius') || '1000', 10);
+    const brandIds = parseArrayParam(searchParams.get('brandIds'));
+    const amenityIds = parseArrayParam(searchParams.get('amenityIds'));
+    const openOnly = searchParams.get('openOnly') === 'true';
+    const search = searchParams.get('search') || '';
 
-    if (!lat || !lng) {
-        return NextResponse.json({ error: 'Thiếu tọa độ' }, { status: 400 });
-    }
+    const apiKey = process.env.GOOGLE_MAPS_SERVER_API_KEY || process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
 
-    const query = `[out:json][timeout:15];(node["shop"="convenience"](around:${radius},${lat},${lng});way["shop"="convenience"](around:${radius},${lat},${lng}););out center;`;
-
-    // Vòng lặp thử từng máy chủ
-    for (const endpoint of OVERPASS_ENDPOINTS) {
+    if (apiKey && apiKey !== 'YOUR_API_KEY') {
         try {
-            const response = await fetch(endpoint, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'text/plain',
-                    'Accept': 'application/json',
-                    'User-Agent': 'ConvenienceFinderApp/1.0 (Du an mon hoc ma nguon mo - Sinh vien)'
-                },
-                body: query
-            });
+            const url = `https://maps.googleapis.com/maps/api/place/nearbysearch/json?location=${lat},${lng}&radius=${radius}&type=convenience_store&key=${apiKey}`;
+            const res = await fetch(url);
+            const data = await res.json();
 
-            // Nếu máy chủ này báo lỗi (429, 500, 502), bỏ qua và thử máy chủ tiếp theo
-            if (!response.ok) {
-                console.warn(`Máy chủ ${endpoint} lỗi ${response.status}, đang thử máy chủ khác...`);
-                continue; 
+            if (data.status === 'OK' && data.results && data.results.length > 0) {
+                const stores = data.results.map((place: any) => ({
+                    id: place.place_id,
+                    name: place.name,
+                    address: place.vicinity || 'Địa chỉ đang cập nhật',
+                    lat: place.geometry.location.lat,
+                    lng: place.geometry.location.lng,
+                    rating: place.rating || 4.2,
+                    isOpen: place.opening_hours ? place.opening_hours.open_now : true,
+                    is24h: place.opening_hours ? place.opening_hours.open_now : true,
+                    amenities: ['wifi'],
+                    brandId: 'circle-k',
+                }));
+
+                return NextResponse.json({ stores, brands: getStoreCatalog().brands, amenities: getStoreCatalog().amenities });
             }
-
-            const data = await response.json();
-
-            const stores = (data.elements || []).map((el: any) => {
-                const storeLat = el.lat || el.center?.lat;
-                const storeLng = el.lon || el.center?.lon;
-                const name = el.tags?.name || el.tags?.brand || 'Cửa hàng tiện lợi';
-                const address = `${el.tags?.['addr:housenumber'] || ''} ${el.tags?.['addr:street'] || ''}`.trim() || 'Chưa cập nhật địa chỉ';
-
-                return {
-                    id: el.id.toString(),
-                    name,
-                    address,
-                    lat: storeLat,
-                    lng: storeLng,
-                    rating: (Math.random() * (5 - 4) + 4).toFixed(1),
-                    isOpen: true,
-                };
-            });
-
-            // Nếu thành công ở một máy chủ bất kỳ, trả về kết quả và kết thúc luôn
-            return NextResponse.json({ stores });
-
         } catch (error) {
-            console.warn(`Không thể kết nối tới ${endpoint}, tiếp tục thử...`);
+            console.error('Lỗi khi gọi Google Places API:', error);
         }
     }
 
-    // Nếu tất cả máy chủ đều sập, trả về mảng rỗng để bảo vệ giao diện
-    console.error('Tất cả máy chủ Overpass đều không phản hồi.');
-    return NextResponse.json({ stores: [] });
+    const [dbCatalog, dbStores] = await Promise.all([
+        getStoreCatalogFromDatabase(),
+        queryStoresFromDatabase({
+            lat,
+            lng,
+            radius,
+            brandIds,
+            amenityIds,
+            openOnly,
+            search,
+        }),
+    ]);
+
+    if (dbCatalog && dbStores) {
+        return NextResponse.json({
+            stores: dbStores,
+            brands: dbCatalog.brands,
+            amenities: dbCatalog.amenities,
+        });
+    }
+
+    const stores = queryStores({
+        lat,
+        lng,
+        radius,
+        brandIds,
+        amenityIds,
+        openOnly,
+        search,
+    });
+
+    const { brands, amenities } = getStoreCatalog();
+
+    return NextResponse.json({
+        stores,
+        brands,
+        amenities,
+    });
 }

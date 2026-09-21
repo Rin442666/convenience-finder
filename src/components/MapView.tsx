@@ -94,43 +94,81 @@ export default function MapView({ center, stores, selectedStore, onMapMoveEnd }:
         routeLayerRef.current = null;
       }
 
-      // Vẽ tuyến đường mới an toàn bằng L.polyline
-      if (selectedStore && selectedStore.lat && selectedStore.lng && center.lat && center.lng) {
+      const drawRoute = (latLngs: [number, number][]) => {
+        if (!Array.isArray(latLngs) || latLngs.length < 2 || !mapInstanceRef.current) {
+          return;
+        }
+
+        const safeLatLngs = latLngs.filter(
+          (point) => Array.isArray(point) && point.length >= 2 && Number.isFinite(point[0]) && Number.isFinite(point[1])
+        ) as [number, number][];
+
+        if (safeLatLngs.length < 2) {
+          return;
+        }
+
+        const leafletLatLngs = safeLatLngs.map(([lat, lng]) => window.L.latLng(lat, lng));
+
+        routeLayerRef.current = window.L.polyline(leafletLatLngs, {
+          color: '#2563eb',
+          weight: 5,
+          opacity: 0.8,
+        }).addTo(map);
+
+        try {
+          map.fitBounds(window.L.latLngBounds(leafletLatLngs), { padding: [40, 40] });
+        } catch (error) {
+          console.warn('Không thể fit bounds cho route:', error);
+          map.setView(leafletLatLngs[0], 14);
+        }
+      };
+
+      if (selectedStore && Number.isFinite(selectedStore.lat) && Number.isFinite(selectedStore.lng) && Number.isFinite(center.lat) && Number.isFinite(center.lng)) {
+        const directRoute: [number, number][] = [
+          [center.lat, center.lng],
+          [selectedStore.lat, selectedStore.lng],
+        ];
+
         const osrmUrl = `https://router.project-osrm.org/route/v1/driving/${center.lng},${center.lat};${selectedStore.lng},${selectedStore.lat}?overview=full&geometries=geojson`;
 
         fetch(osrmUrl)
           .then((res) => res.json())
           .then((data) => {
-            if (data.routes && data.routes.length > 0 && data.routes[0].geometry?.coordinates) {
-              const coordinates = data.routes[0].geometry.coordinates;
+            const coordinates = data?.routes?.[0]?.geometry?.coordinates;
 
-              // Chuyển đổi [lng, lat] -> [lat, lng] cho L.polyline
-              const latLngs = coordinates.map((coord: [number, number]) => [coord[1], coord[0]]);
-
-              if (latLngs.length > 0 && mapInstanceRef.current) {
-                routeLayerRef.current = window.L.polyline(latLngs, {
-                  color: '#2563eb',
-                  weight: 5,
-                  opacity: 0.8,
-                }).addTo(map);
-
-                map.fitBounds(routeLayerRef.current.getBounds(), { padding: [40, 40] });
-              }
+            if (Array.isArray(coordinates) && coordinates.length > 0) {
+              const latLngs = coordinates.map(([lng, lat]: [number, number]) => [lat, lng] as [number, number]);
+              drawRoute(latLngs);
+              return;
             }
+
+            drawRoute(directRoute);
           })
-          .catch((err) => console.error('Lỗi lấy tuyến đường OSRM:', err));
+          .catch(() => {
+            drawRoute(directRoute);
+          });
+      } else {
+        map.setView([center.lat, center.lng], 14);
       }
     };
 
     if (window.L) {
       initMap();
-    } else {
-      const script = document.createElement('script');
-      script.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
-      script.async = true;
-      script.onload = () => initMap();
-      document.head.appendChild(script);
+      return;
     }
+
+    const existingScript = document.getElementById('leaflet-js');
+    if (existingScript) {
+      existingScript.addEventListener('load', () => initMap(), { once: true });
+      return;
+    }
+
+    const script = document.createElement('script');
+    script.id = 'leaflet-js';
+    script.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
+    script.async = true;
+    script.onload = () => initMap();
+    document.head.appendChild(script);
   }, [center, stores, selectedStore]);
 
   return <div ref={mapContainerRef} className="w-full h-full min-h-[500px] rounded-xl z-0" />;
