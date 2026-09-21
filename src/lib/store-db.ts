@@ -1,5 +1,7 @@
 import sql from 'mssql';
 
+let sharedSqlPool: sql.ConnectionPool | null = null;
+
 export type Brand = {
   id: string;
   name: string;
@@ -191,21 +193,16 @@ export function getStoreCatalog() {
 }
 
 function getSqlConfig() {
-  const server = process.env.SQL_SERVER || 'localhost';
+  const server = process.env.SQL_SERVER || 'LAPTOP-7QBE5ENO\\SQLEXPRESS';
   const database = process.env.SQL_DATABASE || 'ConvenienceFinder';
   const user = process.env.SQL_USERNAME;
   const password = process.env.SQL_PASSWORD;
+  const instanceName = process.env.SQL_INSTANCE || (server.includes('\\') ? server.split('\\').pop() : undefined);
+  const port = process.env.SQL_PORT ? Number(process.env.SQL_PORT) : undefined;
 
-  if (!user || !password) {
-    return null;
-  }
-
-  return {
-    user,
-    password,
+  const config: any = {
     server,
     database,
-    port: Number(process.env.SQL_PORT || 1433),
     options: {
       encrypt: false,
       trustServerCertificate: true,
@@ -217,19 +214,40 @@ function getSqlConfig() {
       idleTimeoutMillis: 30000,
     },
   };
+
+  if (instanceName && !server.includes('\\')) {
+    config.options.instanceName = instanceName;
+  }
+
+  if (server.includes('\\') && instanceName) {
+    config.options.instanceName = instanceName;
+  }
+
+  if (port && !server.includes('\\') && !instanceName) {
+    config.port = port;
+  }
+
+  if (user && password) {
+    config.user = user;
+    config.password = password;
+  }
+
+  return config;
 }
 
 async function getSqlPool() {
-  const config = getSqlConfig();
-
-  if (!config) {
-    return null;
+  if (sharedSqlPool && sharedSqlPool.connected) {
+    return sharedSqlPool;
   }
 
+  const config = getSqlConfig();
+
   try {
-    return await sql.connect(config);
+    sharedSqlPool = await sql.connect(config);
+    return sharedSqlPool;
   } catch (error) {
-    console.error('Không thể kết nối SQL Server:', error);
+    console.error('Không thể kết nối SQL Server. Kiểm tra SQL_SERVER, SQL_DATABASE, SQL_USERNAME, SQL_PASSWORD, SQL_INSTANCE:', error);
+    sharedSqlPool = null;
     return null;
   }
 }
@@ -260,12 +278,6 @@ export async function getStoreCatalogFromDatabase() {
   } catch (error) {
     console.error('Không thể truy vấn catalog từ SQL Server:', error);
     return null;
-  } finally {
-    try {
-      await pool.close();
-    } catch {
-      // noop
-    }
   }
 }
 
@@ -352,12 +364,6 @@ export async function queryStoresFromDatabase(filters: StoreFilters): Promise<St
   } catch (error) {
     console.error('Không thể truy vấn cửa hàng từ SQL Server:', error);
     return null;
-  } finally {
-    try {
-      await pool.close();
-    } catch {
-      // noop
-    }
   }
 }
 
