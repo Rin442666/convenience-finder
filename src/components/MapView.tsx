@@ -26,6 +26,11 @@ export default function MapView({ center, stores, selectedStore, onMapMoveEnd }:
   const mapInstanceRef = useRef<any>(null);
   const routeLayerRef = useRef<any>(null);
   const markersGroupRef = useRef<any>(null);
+  // Ghi nhớ view trước đó để không reset góc nhìn khi chỉ đổi filter.
+  const prevCenterRef = useRef<UserLocation | null>(null);
+  const prevSelectedIdRef = useRef<string | null>(null);
+  // Đánh số request vẽ đường đi để response cũ không ghi đè (race condition).
+  const routeRequestIdRef = useRef<number>(0);
 
   useEffect(() => {
     if (!document.getElementById('leaflet-css')) {
@@ -57,6 +62,17 @@ export default function MapView({ center, stores, selectedStore, onMapMoveEnd }:
       }
 
       const map = mapInstanceRef.current;
+
+      // Chỉ reset góc nhìn khi vị trí trung tâm thật sự đổi (GPS mới),
+      // không reset khi người dùng chỉ đổi filter/tìm kiếm.
+      const centerChanged =
+        !prevCenterRef.current ||
+        prevCenterRef.current.lat !== center.lat ||
+        prevCenterRef.current.lng !== center.lng;
+      const selectedId = selectedStore?.id ?? null;
+      const selectionChanged = prevSelectedIdRef.current !== selectedId;
+      prevCenterRef.current = { lat: center.lat, lng: center.lng };
+      prevSelectedIdRef.current = selectedId;
 
       // Xóa ghim cũ khi re-render
       if (markersGroupRef.current) {
@@ -105,7 +121,7 @@ export default function MapView({ center, stores, selectedStore, onMapMoveEnd }:
         routeLayerRef.current = null;
       }
 
-      const drawRoute = (latLngs: [number, number][]) => {
+      const drawRoute = (latLngs: [number, number][], fitBoundsToRoute: boolean) => {
         if (!Array.isArray(latLngs) || latLngs.length < 2 || !mapInstanceRef.current) {
           return;
         }
@@ -126,6 +142,12 @@ export default function MapView({ center, stores, selectedStore, onMapMoveEnd }:
           opacity: 0.8,
         }).addTo(map);
 
+        // Chỉ fit bounds khi vừa chọn cửa hàng hoặc vị trí đổi;
+        // đổi filter thì giữ nguyên góc nhìn người dùng đang xem.
+        if (!fitBoundsToRoute) {
+          return;
+        }
+
         try {
           map.fitBounds(window.L.latLngBounds(leafletLatLngs), { padding: [40, 40] });
         } catch (error) {
@@ -141,24 +163,33 @@ export default function MapView({ center, stores, selectedStore, onMapMoveEnd }:
         ];
 
         const osrmUrl = `https://router.project-osrm.org/route/v1/driving/${center.lng},${center.lat};${selectedStore.lng},${selectedStore.lat}?overview=full&geometries=geojson`;
+        const routeRequestId = ++routeRequestIdRef.current;
+        const shouldFitBounds = selectionChanged || centerChanged;
 
         fetch(osrmUrl)
           .then((res) => res.json())
           .then((data) => {
+            // Bỏ qua response của request cũ (người dùng đã chọn cửa hàng khác).
+            if (routeRequestIdRef.current !== routeRequestId) {
+              return;
+            }
             const coordinates = data?.routes?.[0]?.geometry?.coordinates;
 
             if (Array.isArray(coordinates) && coordinates.length > 0) {
               const latLngs = coordinates.map(([lng, lat]: [number, number]) => [lat, lng] as [number, number]);
-              drawRoute(latLngs);
+              drawRoute(latLngs, shouldFitBounds);
               return;
             }
 
-            drawRoute(directRoute);
+            drawRoute(directRoute, shouldFitBounds);
           })
           .catch(() => {
-            drawRoute(directRoute);
+            if (routeRequestIdRef.current !== routeRequestId) {
+              return;
+            }
+            drawRoute(directRoute, shouldFitBounds);
           });
-      } else {
+      } else if (centerChanged) {
         map.setView([center.lat, center.lng], 14);
       }
     };

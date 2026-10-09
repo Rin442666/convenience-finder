@@ -122,6 +122,18 @@ export default function Home() {
     const [radius, setRadius] = useState<number>(1000);
     const [selectedStore, setSelectedStore] = useState<Store | null>(null);
     const [searchTerm, setSearchTerm] = useState<string>('');
+    // Debounce ô tìm kiếm 400ms để không bắn request theo từng ký tự gõ.
+    // Debounce đặt trong event handler thay vì useEffect để tránh
+    // setState đồng bộ trong effect (gây cảnh báo lint).
+    const [debouncedSearchTerm, setDebouncedSearchTerm] = useState<string>('');
+    const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const handleSearchChange = (value: string) => {
+        setSearchTerm(value);
+        if (searchDebounceRef.current) {
+            clearTimeout(searchDebounceRef.current);
+        }
+        searchDebounceRef.current = setTimeout(() => setDebouncedSearchTerm(value), 400);
+    };
     const [selectedBrand, setSelectedBrand] = useState<string>('all');
     const [selectedAmenities, setSelectedAmenities] = useState<string[]>([]);
     const [openOnly, setOpenOnly] = useState<boolean>(false);
@@ -182,7 +194,15 @@ export default function Home() {
         requestLocation();
     }, [requestLocation]);
 
+    // Tự refresh danh sách chờ duyệt khi quay lại trang chính
+    // (không sót yêu cầu mới gửi trong lúc admin đang xem trang khác).
+    // Giữ nguyên shape "async function trong effect" như code gốc để
+    // không vi phạm quy tắc set-state-in-effect của linter.
     useEffect(() => {
+        if (mainView !== 'main') {
+            return;
+        }
+
         if (!currentUser || currentUser.role !== 'admin') {
             return;
         }
@@ -200,7 +220,7 @@ export default function Home() {
         }
 
         fetchPendingRequests();
-    }, [currentUser, authToken]);
+    }, [currentUser, authToken, mainView]);
 
     useEffect(() => {
         async function fetchStores() {
@@ -227,8 +247,8 @@ export default function Home() {
                     params.set('amenityIds', selectedAmenities.join(','));
                 }
 
-                if (searchTerm.trim()) {
-                    params.set('search', searchTerm.trim());
+                if (debouncedSearchTerm.trim()) {
+                    params.set('search', debouncedSearchTerm.trim());
                 }
 
                 const res = await fetch(`/api/stores?${params.toString()}`);
@@ -256,7 +276,7 @@ export default function Home() {
         }
 
         fetchStores();
-    }, [userLocation, radius, selectedBrand, selectedAmenities, openOnly, searchTerm, storesRetryKey]);
+    }, [userLocation, radius, selectedBrand, selectedAmenities, openOnly, debouncedSearchTerm, storesRetryKey]);
 
     const toggleAmenity = (amenityId: string) => {
         setSelectedAmenities((current) =>
@@ -428,6 +448,10 @@ export default function Home() {
             }
 
             setPendingRequests((requests) => requests.filter((item) => item.id !== requestId));
+            // Khi duyệt: tải lại danh sách cửa hàng để cửa hàng mới hiện ngay.
+            if (status === 'APPROVED') {
+                setStoresRetryKey((key) => key + 1);
+            }
             toast(`Yêu cầu đã được ${status === 'APPROVED' ? 'duyệt' : 'từ chối'}.`, 'success');
         } catch (error) {
             console.error('Lỗi cập nhật yêu cầu:', error);
@@ -671,7 +695,7 @@ export default function Home() {
                         <label className="block text-sm font-semibold text-gray-800 mb-2">Tìm kiếm</label>
                         <input
                             value={searchTerm}
-                            onChange={(e) => setSearchTerm(e.target.value)}
+                            onChange={(e) => handleSearchChange(e.target.value)}
                             placeholder="Tên cửa hàng hoặc địa chỉ"
                             className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-200"
                         />
@@ -871,7 +895,7 @@ export default function Home() {
                                             </div>
                                             <span className="flex items-center gap-1 text-xs font-medium text-amber-500 whitespace-nowrap">
                                                 <Star className="h-3.5 w-3.5 fill-amber-400 text-amber-400" />
-                                                {store.rating ?? '—'}
+                                                {(store.rating ?? 0) > 0 ? store.rating : '—'}
                                             </span>
                                         </div>
 

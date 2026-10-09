@@ -328,6 +328,14 @@ export const initialStoreSeed: StoreRecord[] = [
   },
 ];
 
+// Thêm cửa hàng mới vào seed (dùng khi admin duyệt yêu cầu thêm cửa hàng).
+// Không thêm trùng id để tránh nhân đôi khi duyệt lại.
+export function addStoreToSeed(store: StoreRecord): void {
+  if (!initialStoreSeed.some((item) => item.id === store.id)) {
+    initialStoreSeed.push(store);
+  }
+}
+
 // Tính trạng thái mở/đóng theo giờ hiện tại từ chuỗi openHours ("06:00-23:00").
 // Xử lý cả khung giờ qua đêm ("22:00-06:00"). Nếu không parse được giờ thì
 // giữ nguyên giá trị isOpen có sẵn (dữ liệu DB hoặc Google Places).
@@ -473,7 +481,20 @@ export async function queryStoresFromDatabase(filters: StoreFilters): Promise<St
   }
 
   try {
-    const storeResult = await pool.request().query(`
+    // Lọc sơ bộ theo bounding-box ngay trong SQL để không phải tải cả bảng
+    // về rồi mới lọc bằng haversine trong JS (rất đắt khi dữ liệu lớn).
+    // 1 độ vĩ độ ≈ 111.32km; 1 độ kinh độ ≈ 111.32km * cos(vĩ độ).
+    // Lọc chính xác theo bán kính tròn vẫn làm ở JS phía dưới.
+    const latDelta = filters.radius / 111320;
+    const lngDelta = filters.radius / (111320 * Math.cos((filters.lat * Math.PI) / 180));
+
+    const storeResult = await pool
+      .request()
+      .input('minLat', sql.Float, filters.lat - latDelta)
+      .input('maxLat', sql.Float, filters.lat + latDelta)
+      .input('minLng', sql.Float, filters.lng - lngDelta)
+      .input('maxLng', sql.Float, filters.lng + lngDelta)
+      .query(`
       SELECT
         s.Id,
         b.Slug AS brandId,
@@ -488,6 +509,8 @@ export async function queryStoresFromDatabase(filters: StoreFilters): Promise<St
       FROM dbo.Stores s
       LEFT JOIN dbo.Brands b ON b.Id = s.BrandId
       WHERE s.Status = 'ACTIVE'
+        AND s.Latitude BETWEEN @minLat AND @maxLat
+        AND s.Longitude BETWEEN @minLng AND @maxLng
       ORDER BY s.Name
     `);
 

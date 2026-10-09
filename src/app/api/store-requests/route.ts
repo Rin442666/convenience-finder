@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createStoreRequest, listPendingStoreRequests, updateStoreRequestStatus } from '@/lib/auth-system';
 import { findServerUserById, getSessionFromRequest, sessionHasPermission } from '@/lib/server-auth';
+import { addStoreToSeed, brands, type StoreRecord } from '@/lib/store-db';
 
 export async function GET(req: Request) {
   // Quyền admin được suy ra từ session token đã verify,
@@ -81,6 +82,28 @@ export async function PATCH(req: Request) {
         { message: 'Không tìm thấy yêu cầu cần cập nhật.' },
         { status: 404 }
       );
+    }
+
+    // Khi admin duyệt: đưa cửa hàng mới vào danh sách để hiện ngay trên
+    // bản đồ/danh sách. Bỏ qua nếu tọa độ không hợp lệ.
+    if (updated.status === 'APPROVED' && Number.isFinite(updated.lat) && Number.isFinite(updated.lng) && updated.lat !== 0 && updated.lng !== 0) {
+      const brand = brands.find(
+        (item) => item.name.trim().toLowerCase() === updated.brandName.trim().toLowerCase()
+      );
+      const validAmenityIds = ['wifi', 'parking', 'seating', '24h', 'cashless', 'wc', 'overnight'];
+      const newStore: StoreRecord = {
+        id: `store-req-${updated.id}`,
+        brandId: brand ? brand.id : 'other',
+        name: updated.storeName,
+        address: updated.address,
+        lat: updated.lat,
+        lng: updated.lng,
+        rating: 0,
+        isOpen: true,
+        is24h: false,
+        amenities: updated.amenities.filter((amenityId) => validAmenityIds.includes(amenityId)),
+      };
+      addStoreToSeed(newStore);
     }
 
     return NextResponse.json({ request: updated });
