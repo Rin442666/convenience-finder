@@ -1,7 +1,7 @@
 'use client';
 
-import { useState, useEffect, useRef, useCallback } from 'react';
-import { MapPin, Star, Navigation, User, X, SearchX, Heart, Clock, Crosshair } from 'lucide-react';
+import { useState, useEffect, useRef, useCallback, useSyncExternalStore } from 'react';
+import { MapPin, Star, Navigation, User, X, SearchX, Heart, Clock, Crosshair, Sun, Moon } from 'lucide-react';
 import MapView from '@/components/MapView';
 import ToastHost, { toast } from '@/components/Toast';
 import { AppUser, StoreRequestRecord, getRoleLabel, hasPermission } from '@/lib/auth-system';
@@ -110,6 +110,25 @@ function getBrandName(brandId?: string): string {
     return brand ? brand.name : 'Cửa hàng tiện lợi';
 }
 
+// Dark mode lưu ở class "dark" trên <html> (script chặn trong <head> của
+// layout gắn sẵn trước khi React hydrate). Đọc qua useSyncExternalStore
+// thay vì useState để lần render đầu của client luôn khớp HTML từ server
+// (getServerSnapshot trả về false), tránh lỗi hydration mismatch với
+// những user đang dùng chế độ tối.
+function subscribeDarkMode(onChange: () => void): () => void {
+    const observer = new MutationObserver(onChange);
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
+    return () => observer.disconnect();
+}
+
+function getDarkModeSnapshot(): boolean {
+    return document.documentElement.classList.contains('dark');
+}
+
+function getDarkModeServerSnapshot(): boolean {
+    return false;
+}
+
 export default function Home() {
     const [userLocation, setUserLocation] = useState<UserLocation>({
         lat: 21.03477,
@@ -158,6 +177,19 @@ export default function Home() {
     // set-state-in-effect.
     const [favoriteIds, setFavoriteIds] = useState<string[]>([]);
     const [favoritesOnly, setFavoritesOnly] = useState<boolean>(false);
+    // Chế độ tối: đọc từ class "dark" trên <html> (Tailwind v4 custom-variant
+    // áp dụng các class dark: theo class này). Ghi bằng cách toggle class +
+    // lưu localStorage; MutationObserver báo cho store render lại.
+    const darkMode = useSyncExternalStore(subscribeDarkMode, getDarkModeSnapshot, getDarkModeServerSnapshot);
+    const setDarkMode = (next: boolean | ((prev: boolean) => boolean)) => {
+        const value = typeof next === 'function' ? next(getDarkModeSnapshot()) : next;
+        document.documentElement.classList.toggle('dark', value);
+        try {
+            window.localStorage.setItem('finder_dark_mode', value ? '1' : '0');
+        } catch {
+            // Bỏ qua khi trình duyệt chặn localStorage.
+        }
+    };
 
     // Nạp danh sách yêu thích từ server (bảng favorites) sau khi đăng nhập.
     const refreshFavorites = async (token: string) => {
@@ -648,39 +680,53 @@ export default function Home() {
     const displayedStores = favoritesOnly ? stores.filter((store) => favoriteIds.includes(store.id)) : stores;
 
     return (
-        <main className="min-h-screen bg-gray-50 p-6">
+        <main className="min-h-screen bg-gray-50 dark:bg-gray-950 p-6">
             <div className="max-w-7xl mx-auto mb-6 flex justify-between items-center gap-4 flex-wrap">
                 <div>
-                    <h1 className="text-2xl font-bold text-blue-600 flex items-center gap-2">
+                    <h1 className="text-2xl font-bold text-blue-600 dark:text-blue-400 flex items-center gap-2">
                         <MapPin className="h-6 w-6" />
                         ConvenienceFinder
                     </h1>
-                    <p className="text-gray-500 text-sm">Tìm cửa hàng tiện lợi gần bạn nhất</p>
+                    <p className="text-gray-500 dark:text-gray-400 text-sm">Tìm cửa hàng tiện lợi gần bạn nhất</p>
                 </div>
 
-                <div className="relative">
+                <div className="flex items-center gap-2">
+                    <button
+                        type="button"
+                        onClick={() => setDarkMode((prev) => !prev)}
+                        title={darkMode ? 'Chuyển sang chế độ sáng' : 'Chuyển sang chế độ tối'}
+                        aria-label={darkMode ? 'Chuyển sang chế độ sáng' : 'Chuyển sang chế độ tối'}
+                        className="rounded-full border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 p-2.5 shadow-sm hover:bg-gray-50 dark:hover:bg-gray-800"
+                    >
+                        {darkMode ? (
+                            <Sun className="h-5 w-5 text-amber-400" />
+                        ) : (
+                            <Moon className="h-5 w-5 text-gray-600 dark:text-gray-400" />
+                        )}
+                    </button>
+                    <div className="relative">
                     {currentUser ? (
                         <div className="relative">
                             <button
                                 type="button"
                                 onClick={() => setAccountMenuOpen((prev) => !prev)}
-                                className="flex items-center gap-2 rounded-full border border-gray-200 bg-white px-3 py-2 shadow-sm hover:bg-gray-50"
+                                className="flex items-center gap-2 rounded-full border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 shadow-sm hover:bg-gray-50 dark:hover:bg-gray-800"
                             >
-                                <span className="flex h-9 w-9 items-center justify-center rounded-full bg-blue-100 text-blue-700">
+                                <span className="flex h-9 w-9 items-center justify-center rounded-full bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300">
                                     <User className="h-5 w-5" />
                                 </span>
-                                <span className="text-sm font-medium text-gray-700">{currentUser.fullName}</span>
+                                <span className="text-sm font-medium text-gray-700 dark:text-gray-300">{currentUser.fullName}</span>
                             </button>
 
                             {accountMenuOpen && (
-                                <div className="absolute right-0 top-full z-20 mt-2 w-64 rounded-xl border border-gray-200 bg-white p-2 shadow-lg">
+                                <div className="absolute right-0 top-full z-20 mt-2 w-64 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 p-2 shadow-lg">
                                     <button
                                         type="button"
                                         onClick={() => {
                                             setMainView('profile');
                                             setAccountMenuOpen(false);
                                         }}
-                                        className="block w-full rounded-lg px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-100"
+                                        className="block w-full rounded-lg px-3 py-2 text-left text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800"
                                     >
                                         Xem thông tin tài khoản
                                     </button>
@@ -690,14 +736,14 @@ export default function Home() {
                                             setMainView('store-request');
                                             setAccountMenuOpen(false);
                                         }}
-                                        className="block w-full rounded-lg px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-100"
+                                        className="block w-full rounded-lg px-3 py-2 text-left text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800"
                                     >
                                         Gửi yêu cầu thêm cửa hàng
                                     </button>
                                     <button
                                         type="button"
                                         onClick={handleLogout}
-                                        className="block w-full rounded-lg px-3 py-2 text-left text-sm text-red-600 hover:bg-red-50"
+                                        className="block w-full rounded-lg px-3 py-2 text-left text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950"
                                     >
                                         Đăng xuất tài khoản
                                     </button>
@@ -716,53 +762,54 @@ export default function Home() {
                             Đăng nhập / Đăng ký
                         </button>
                     )}
+                    </div>
                 </div>
             </div>
 
             {mainView === 'profile' && currentUser && (
-                <div className="max-w-7xl mx-auto mb-6 rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
+                <div className="max-w-7xl mx-auto mb-6 rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 p-5 shadow-sm">
                     <div className="flex items-center justify-between gap-3">
                         <div>
-                            <h2 className="text-xl font-bold text-gray-900">Thông tin tài khoản</h2>
-                            <p className="text-sm text-gray-500">Quản lý tài khoản và quyền truy cập</p>
+                            <h2 className="text-xl font-bold text-gray-900 dark:text-gray-100">Thông tin tài khoản</h2>
+                            <p className="text-sm text-gray-500 dark:text-gray-400">Quản lý tài khoản và quyền truy cập</p>
                         </div>
                         <button
                             type="button"
                             onClick={() => setMainView('main')}
-                            className="text-sm text-blue-600 hover:text-blue-800"
+                            className="text-sm text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-200"
                         >
                             Đóng
                         </button>
                     </div>
 
                     <div className="mt-4 grid gap-4 md:grid-cols-2">
-                        <div className="rounded-xl bg-gray-50 p-4">
-                            <p className="text-xs uppercase tracking-wide text-gray-500">Họ tên</p>
-                            <p className="mt-1 text-lg font-semibold text-gray-800">{currentUser.fullName}</p>
+                        <div className="rounded-xl bg-gray-50 dark:bg-gray-800 p-4">
+                            <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Họ tên</p>
+                            <p className="mt-1 text-lg font-semibold text-gray-800 dark:text-gray-200">{currentUser.fullName}</p>
                         </div>
-                        <div className="rounded-xl bg-gray-50 p-4">
-                            <p className="text-xs uppercase tracking-wide text-gray-500">Vai trò</p>
-                            <p className="mt-1 text-lg font-semibold text-gray-800">{getRoleLabel(currentUser.role)}</p>
+                        <div className="rounded-xl bg-gray-50 dark:bg-gray-800 p-4">
+                            <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Vai trò</p>
+                            <p className="mt-1 text-lg font-semibold text-gray-800 dark:text-gray-200">{getRoleLabel(currentUser.role)}</p>
                         </div>
-                        <div className="rounded-xl bg-gray-50 p-4 md:col-span-2">
-                            <p className="text-xs uppercase tracking-wide text-gray-500">Email</p>
-                            <p className="mt-1 text-lg font-semibold text-gray-800">{currentUser.email}</p>
+                        <div className="rounded-xl bg-gray-50 dark:bg-gray-800 p-4 md:col-span-2">
+                            <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Email</p>
+                            <p className="mt-1 text-lg font-semibold text-gray-800 dark:text-gray-200">{currentUser.email}</p>
                         </div>
                     </div>
                 </div>
             )}
 
             {mainView === 'store-request' && currentUser && (
-                <div className="max-w-7xl mx-auto mb-6 rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
+                <div className="max-w-7xl mx-auto mb-6 rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 p-5 shadow-sm">
                     <div className="flex items-center justify-between gap-3">
                         <div>
-                            <h2 className="text-xl font-bold text-gray-900">Gửi yêu cầu thêm cửa hàng</h2>
-                            <p className="text-sm text-gray-500">Yêu cầu của bạn sẽ được Admin xác nhận trước khi tạo cửa hàng mới.</p>
+                            <h2 className="text-xl font-bold text-gray-900 dark:text-gray-100">Gửi yêu cầu thêm cửa hàng</h2>
+                            <p className="text-sm text-gray-500 dark:text-gray-400">Yêu cầu của bạn sẽ được Admin xác nhận trước khi tạo cửa hàng mới.</p>
                         </div>
                         <button
                             type="button"
                             onClick={() => setMainView('main')}
-                            className="text-sm text-blue-600 hover:text-blue-800"
+                            className="text-sm text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-200"
                         >
                             Quay lại
                         </button>
@@ -772,19 +819,19 @@ export default function Home() {
                         <input
                             value={storeRequestForm.storeName}
                             onChange={(e) => setStoreRequestForm({ ...storeRequestForm, storeName: e.target.value })}
-                            className="border border-gray-200 rounded-xl px-3 py-2.5 text-sm"
+                            className="border border-gray-200 dark:border-gray-700 rounded-xl px-3 py-2.5 text-sm"
                             placeholder="Tên cửa hàng"
                         />
                         <input
                             value={storeRequestForm.brandName}
                             onChange={(e) => setStoreRequestForm({ ...storeRequestForm, brandName: e.target.value })}
-                            className="border border-gray-200 rounded-xl px-3 py-2.5 text-sm"
+                            className="border border-gray-200 dark:border-gray-700 rounded-xl px-3 py-2.5 text-sm"
                             placeholder="Thương hiệu"
                         />
                         <input
                             value={storeRequestForm.address}
                             onChange={(e) => setStoreRequestForm({ ...storeRequestForm, address: e.target.value })}
-                            className="border border-gray-200 rounded-xl px-3 py-2.5 text-sm md:col-span-2"
+                            className="border border-gray-200 dark:border-gray-700 rounded-xl px-3 py-2.5 text-sm md:col-span-2"
                             placeholder="Địa chỉ cửa hàng"
                         />
                         <input
@@ -792,7 +839,7 @@ export default function Home() {
                             step="0.0001"
                             value={storeRequestForm.lat}
                             onChange={(e) => setStoreRequestForm({ ...storeRequestForm, lat: Number(e.target.value) })}
-                            className="border border-gray-200 rounded-xl px-3 py-2.5 text-sm"
+                            className="border border-gray-200 dark:border-gray-700 rounded-xl px-3 py-2.5 text-sm"
                             placeholder="Lat"
                         />
                         <input
@@ -800,13 +847,13 @@ export default function Home() {
                             step="0.0001"
                             value={storeRequestForm.lng}
                             onChange={(e) => setStoreRequestForm({ ...storeRequestForm, lng: Number(e.target.value) })}
-                            className="border border-gray-200 rounded-xl px-3 py-2.5 text-sm"
+                            className="border border-gray-200 dark:border-gray-700 rounded-xl px-3 py-2.5 text-sm"
                             placeholder="Lng"
                         />
                         <textarea
                             value={storeRequestForm.notes}
                             onChange={(e) => setStoreRequestForm({ ...storeRequestForm, notes: e.target.value })}
-                            className="border border-gray-200 rounded-xl px-3 py-2.5 text-sm md:col-span-2"
+                            className="border border-gray-200 dark:border-gray-700 rounded-xl px-3 py-2.5 text-sm md:col-span-2"
                             rows={4}
                             placeholder="Ghi chú, mô tả hoặc thông tin bổ sung"
                         />
@@ -825,21 +872,21 @@ export default function Home() {
             )}
 
             {currentUser && currentUser.role === 'admin' && pendingRequests.length > 0 && (
-                <div className="max-w-7xl mx-auto mb-6 rounded-2xl border border-yellow-200 bg-yellow-50 p-5 shadow-sm">
-                    <h3 className="text-lg font-bold text-gray-900">Yêu cầu chờ xác nhận</h3>
+                <div className="max-w-7xl mx-auto mb-6 rounded-2xl border border-yellow-200 dark:border-yellow-800 bg-yellow-50 dark:bg-yellow-950 p-5 shadow-sm">
+                    <h3 className="text-lg font-bold text-gray-900 dark:text-gray-100">Yêu cầu chờ xác nhận</h3>
                     <div className="mt-4 space-y-3">
                         {pendingRequests.map((request) => (
-                            <div key={request.id} className="rounded-xl border border-yellow-200 bg-white p-4">
+                            <div key={request.id} className="rounded-xl border border-yellow-200 dark:border-yellow-800 bg-white dark:bg-gray-900 p-4">
                                 <div className="flex items-center justify-between gap-3">
                                     <div>
-                                        <p className="font-semibold text-gray-800">{request.storeName}</p>
-                                        <p className="text-xs text-gray-500">{request.address}</p>
+                                        <p className="font-semibold text-gray-800 dark:text-gray-200">{request.storeName}</p>
+                                        <p className="text-xs text-gray-500 dark:text-gray-400">{request.address}</p>
                                     </div>
-                                    <span className="rounded-full bg-yellow-100 px-2 py-1 text-xs font-medium text-yellow-700">
+                                    <span className="rounded-full bg-yellow-100 dark:bg-yellow-900 px-2 py-1 text-xs font-medium text-yellow-700 dark:text-yellow-300">
                                         {request.status}
                                     </span>
                                 </div>
-                                <p className="mt-2 text-xs text-gray-600">Người gửi: {request.submittedByName}</p>
+                                <p className="mt-2 text-xs text-gray-600 dark:text-gray-400">Người gửi: {request.submittedByName}</p>
                                 <div className="mt-3 flex gap-2">
                                     <button
                                         type="button"
@@ -863,24 +910,24 @@ export default function Home() {
             )}
 
             {/* Thanh bộ lọc ngang gọn (thay sidebar dài) + dải thống kê luôn nhìn thấy */}
-            <div className="max-w-7xl mx-auto mb-6 rounded-2xl bg-white px-4 py-3.5 shadow-md">
+            <div className="max-w-7xl mx-auto mb-6 rounded-2xl bg-white dark:bg-gray-900 px-4 py-3.5 shadow-md">
                 <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-[minmax(0,1fr)_130px_160px_180px_160px]">
                     <div>
-                        <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-gray-500">Tìm kiếm</label>
+                        <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Tìm kiếm</label>
                         <input
                             value={searchTerm}
                             onChange={(e) => handleSearchChange(e.target.value)}
                             placeholder="Tên cửa hàng hoặc địa chỉ"
-                            className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                            className="w-full border border-gray-200 dark:border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-800 dark:text-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-200 dark:focus:ring-blue-800"
                         />
                     </div>
 
                     <div>
-                        <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-gray-500">Bán kính</label>
+                        <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Bán kính</label>
                         <select
                             value={radius}
                             onChange={(e) => setRadius(Number(e.target.value))}
-                            className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white text-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                            className="w-full border border-gray-200 dark:border-gray-700 rounded-lg px-3 py-2 text-sm bg-white dark:bg-gray-900 text-gray-800 dark:text-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-200 dark:focus:ring-blue-800"
                         >
                             <option value={300}>300 m</option>
                             <option value={500}>500 m</option>
@@ -891,11 +938,11 @@ export default function Home() {
                     </div>
 
                     <div>
-                        <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-gray-500">Thương hiệu</label>
+                        <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Thương hiệu</label>
                         <select
                             value={selectedBrand}
                             onChange={(e) => setSelectedBrand(e.target.value)}
-                            className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white text-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                            className="w-full border border-gray-200 dark:border-gray-700 rounded-lg px-3 py-2 text-sm bg-white dark:bg-gray-900 text-gray-800 dark:text-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-200 dark:focus:ring-blue-800"
                         >
                             {brandOptions.map((brand) => (
                                 <option key={brand.id} value={brand.id}>
@@ -906,11 +953,11 @@ export default function Home() {
                     </div>
 
                     <div>
-                        <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-gray-500">Sắp xếp</label>
+                        <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Sắp xếp</label>
                         <select
                             value={sortBy}
                             onChange={(e) => setSortBy(e.target.value as 'nearest' | 'rating')}
-                            className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white text-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                            className="w-full border border-gray-200 dark:border-gray-700 rounded-lg px-3 py-2 text-sm bg-white dark:bg-gray-900 text-gray-800 dark:text-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-200 dark:focus:ring-blue-800"
                         >
                             <option value="nearest">Gần nhất trước</option>
                             <option value="rating">Đánh giá cao nhất</option>
@@ -918,11 +965,11 @@ export default function Home() {
                     </div>
 
                     <div>
-                        <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-gray-500">Đánh giá tối thiểu</label>
+                        <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Đánh giá tối thiểu</label>
                         <select
                             value={minRating}
                             onChange={(e) => setMinRating(Number(e.target.value))}
-                            className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white text-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                            className="w-full border border-gray-200 dark:border-gray-700 rounded-lg px-3 py-2 text-sm bg-white dark:bg-gray-900 text-gray-800 dark:text-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-200 dark:focus:ring-blue-800"
                         >
                             <option value={0}>Mọi mức</option>
                             <option value={3}>Từ 3.0 sao</option>
@@ -942,7 +989,7 @@ export default function Home() {
                                 onClick={() => toggleAmenity(amenity.id)}
                                 className={`rounded-full px-3 py-1.5 text-xs font-medium transition ${active
                                         ? 'bg-blue-600 text-white shadow-sm'
-                                        : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                                        : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700'
                                     }`}
                             >
                                 {amenity.name}
@@ -954,7 +1001,7 @@ export default function Home() {
                         onClick={() => setOpenOnly((prev) => !prev)}
                         className={`rounded-full px-3 py-1.5 text-xs font-medium transition ${openOnly
                                 ? 'bg-emerald-600 text-white shadow-sm'
-                                : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                                : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700'
                             }`}
                     >
                         Chỉ đang mở
@@ -962,16 +1009,16 @@ export default function Home() {
                 </div>
 
                 {!isLoadingStores && (
-                    <div className="mt-4 flex flex-wrap items-center gap-x-5 gap-y-1.5 border-t border-gray-100 pt-3 text-sm text-gray-600">
+                    <div className="mt-4 flex flex-wrap items-center gap-x-5 gap-y-1.5 border-t border-gray-100 dark:border-gray-800 pt-3 text-sm text-gray-600 dark:text-gray-400">
                         <span>
-                            <span className="font-bold text-gray-900">{stores.length}</span> cửa hàng trong {formatRadius(radius)}
+                            <span className="font-bold text-gray-900 dark:text-gray-100">{stores.length}</span> cửa hàng trong {formatRadius(radius)}
                         </span>
                         <span>
-                            <span className="font-bold text-emerald-600">{openStoreCount}</span> đang mở
+                            <span className="font-bold text-emerald-600 dark:text-emerald-400">{openStoreCount}</span> đang mở
                         </span>
                         {nearestStore && (
                             <span className="min-w-0 truncate">
-                                Gần nhất: <span className="font-semibold text-gray-900">{nearestStore.name}</span>
+                                Gần nhất: <span className="font-semibold text-gray-900 dark:text-gray-100">{nearestStore.name}</span>
                                 {' '}• {formatDistanceValue(nearestStore.distanceMeters)}
                             </span>
                         )}
@@ -997,7 +1044,7 @@ export default function Home() {
                                 <button
                                     type="button"
                                     onClick={requestLocation}
-                                    className="font-semibold text-blue-600 hover:text-blue-800"
+                                    className="font-semibold text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-200"
                                 >
                                     Dùng vị trí của tôi
                                 </button>
@@ -1009,7 +1056,7 @@ export default function Home() {
 
             <div className="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_340px] gap-6">
 
-                <div className="relative bg-white rounded-2xl shadow-md p-2 h-[600px]">
+                <div className="relative bg-white dark:bg-gray-900 rounded-2xl shadow-md p-2 h-[600px]">
                         {/* Cụm nút đặt ở góc phải để không che nút zoom +/- (góc trái) của bản đồ.
                             z-10: đủ nổi trên các lớp của Leaflet, nhưng thấp hơn modal (z-40)
                             để không đè lên modal chi tiết khi mở. */}
@@ -1019,7 +1066,7 @@ export default function Home() {
                                 onClick={() => setPickingLocation((prev) => !prev)}
                                 className={`flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold shadow-md transition ${pickingLocation
                                         ? 'bg-blue-600 text-white hover:bg-blue-700'
-                                        : 'bg-white text-gray-700 hover:bg-gray-50'
+                                        : 'bg-white dark:bg-gray-900 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800'
                                     }`}
                             >
                                 <Crosshair className="h-4 w-4" />
@@ -1029,7 +1076,7 @@ export default function Home() {
                                 <button
                                     type="button"
                                     onClick={requestLocation}
-                                    className="rounded-lg bg-white px-3 py-2 text-xs font-semibold text-blue-600 shadow-md hover:bg-blue-50"
+                                    className="rounded-lg bg-white dark:bg-gray-900 px-3 py-2 text-xs font-semibold text-blue-600 dark:text-blue-400 shadow-md hover:bg-blue-50 dark:hover:bg-blue-950"
                                 >
                                     Về vị trí của tôi
                                 </button>
@@ -1049,19 +1096,19 @@ export default function Home() {
                         />
                     </div>
 
-                    <div className="bg-white rounded-2xl shadow-md h-[600px] flex flex-col overflow-hidden">
+                    <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-md h-[600px] flex flex-col overflow-hidden">
                         <div className="shrink-0 p-4 pb-3">
-                            <h2 className="font-bold text-base text-gray-800">
+                            <h2 className="font-bold text-base text-gray-800 dark:text-gray-200">
                                 Danh sách cửa hàng ({displayedStores.length})
                             </h2>
                             {currentUser && (
-                                <div className="mt-2.5 flex rounded-lg bg-gray-100 p-0.5 text-xs font-medium">
+                                <div className="mt-2.5 flex rounded-lg bg-gray-100 dark:bg-gray-800 p-0.5 text-xs font-medium">
                                     <button
                                         type="button"
                                         onClick={() => setFavoritesOnly(false)}
                                         className={`flex-1 whitespace-nowrap rounded-md px-2.5 py-1.5 transition ${!favoritesOnly
-                                                ? 'bg-white text-gray-900 shadow-sm'
-                                                : 'text-gray-500 hover:text-gray-700'
+                                                ? 'bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 shadow-sm'
+                                                : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
                                             }`}
                                     >
                                         Tất cả
@@ -1070,18 +1117,18 @@ export default function Home() {
                                         type="button"
                                         onClick={() => setFavoritesOnly(true)}
                                         className={`flex flex-1 items-center justify-center gap-1 whitespace-nowrap rounded-md px-2.5 py-1.5 transition ${favoritesOnly
-                                                ? 'bg-white text-gray-900 shadow-sm'
-                                                : 'text-gray-500 hover:text-gray-700'
+                                                ? 'bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 shadow-sm'
+                                                : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
                                             }`}
                                     >
-                                        <Heart className={`h-3.5 w-3.5 shrink-0 ${favoritesOnly ? 'fill-red-500 text-red-500' : ''}`} />
+                                        <Heart className={`h-3.5 w-3.5 shrink-0 ${favoritesOnly ? 'fill-red-500 text-red-500 dark:text-red-400' : ''}`} />
                                         Yêu thích
                                     </button>
                                 </div>
                             )}
 
                         {storesError && stores.length > 0 && (
-                            <div className="mb-3 flex items-center justify-between gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                            <div className="mb-3 flex items-center justify-between gap-2 rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950 px-3 py-2 text-xs text-amber-800 dark:text-amber-200">
                                 <span>Đang hiển thị kết quả cũ do tải mới thất bại.</span>
                                 <button
                                     type="button"
@@ -1089,7 +1136,7 @@ export default function Home() {
                                         setStoresError(false);
                                         setStoresRetryKey((key) => key + 1);
                                     }}
-                                    className="shrink-0 font-semibold text-amber-900 underline hover:text-amber-700"
+                                    className="shrink-0 font-semibold text-amber-900 dark:text-amber-200 underline hover:text-amber-700 dark:hover:text-amber-300"
                                 >
                                     Tải lại
                                 </button>
@@ -1103,11 +1150,11 @@ export default function Home() {
                                 {[0, 1, 2].map((skeletonIndex) => (
                                     <div
                                         key={skeletonIndex}
-                                        className="animate-pulse rounded-xl border border-gray-200 p-4"
+                                        className="animate-pulse rounded-xl border border-gray-200 dark:border-gray-700 p-4"
                                     >
-                                        <div className="h-4 w-2/3 rounded bg-gray-200" />
-                                        <div className="mt-2 h-3 w-1/2 rounded bg-gray-200" />
-                                        <div className="mt-3 h-3 w-1/3 rounded bg-gray-200" />
+                                        <div className="h-4 w-2/3 rounded bg-gray-200 dark:bg-gray-700" />
+                                        <div className="mt-2 h-3 w-1/2 rounded bg-gray-200 dark:bg-gray-700" />
+                                        <div className="mt-3 h-3 w-1/3 rounded bg-gray-200 dark:bg-gray-700" />
                                     </div>
                                 ))}
                             </div>
@@ -1115,17 +1162,17 @@ export default function Home() {
                             <div className="flex h-[380px] flex-col items-center justify-center text-center">
                                 {favoritesOnly ? (
                                     <>
-                                        <Heart className="h-10 w-10 text-gray-300" />
-                                        <p className="mt-3 font-semibold text-gray-700">Chưa có cửa hàng yêu thích</p>
-                                        <p className="mt-1 max-w-[240px] text-sm text-gray-500">
+                                        <Heart className="h-10 w-10 text-gray-300 dark:text-gray-600" />
+                                        <p className="mt-3 font-semibold text-gray-700 dark:text-gray-300">Chưa có cửa hàng yêu thích</p>
+                                        <p className="mt-1 max-w-[240px] text-sm text-gray-500 dark:text-gray-400">
                                             Nhấn biểu tượng trái tim trên cửa hàng để lưu lại những nơi bạn hay ghé.
                                         </p>
                                     </>
                                 ) : (
                                     <>
-                                        <SearchX className="h-10 w-10 text-gray-300" />
-                                        <p className="mt-3 font-semibold text-gray-700">Không tìm thấy cửa hàng nào</p>
-                                        <p className="mt-1 max-w-[240px] text-sm text-gray-500">
+                                        <SearchX className="h-10 w-10 text-gray-300 dark:text-gray-600" />
+                                        <p className="mt-3 font-semibold text-gray-700 dark:text-gray-300">Không tìm thấy cửa hàng nào</p>
+                                        <p className="mt-1 max-w-[240px] text-sm text-gray-500 dark:text-gray-400">
                                             Thử nới rộng bán kính tìm kiếm hoặc bỏ bớt điều kiện lọc.
                                         </p>
                                     </>
@@ -1145,16 +1192,16 @@ export default function Home() {
                                         key={store.id}
                                         onClick={() => setSelectedStore(store)}
                                         className={`p-4 rounded-xl border transition-all cursor-pointer ${isSelected
-                                                ? 'border-blue-500 bg-blue-50/50 shadow-sm'
-                                                : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'
+                                                ? 'border-blue-500 bg-blue-50 dark:bg-blue-950/50 shadow-sm'
+                                                : 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-800'
                                             }`}
                                     >
                                         <div className="flex justify-between items-start gap-3">
                                             <div>
-                                                <h3 className="font-semibold text-gray-900">{store.name}</h3>
-                                                <p className="text-xs text-gray-500 mt-1">{store.address}</p>
+                                                <h3 className="font-semibold text-gray-900 dark:text-gray-100">{store.name}</h3>
+                                                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">{store.address}</p>
                                                 {distanceLabel && (
-                                                    <p className="mt-1.5 flex items-center gap-1 text-xs font-medium text-blue-600">
+                                                    <p className="mt-1.5 flex items-center gap-1 text-xs font-medium text-blue-600 dark:text-blue-400">
                                                         <MapPin className="h-3.5 w-3.5" />
                                                         {distanceLabel}
                                                     </p>
@@ -1169,12 +1216,12 @@ export default function Home() {
                                                         e.stopPropagation();
                                                         toggleFavorite(store);
                                                     }}
-                                                    className="rounded-lg p-1.5 transition hover:bg-red-50"
+                                                    className="rounded-lg p-1.5 transition hover:bg-red-50 dark:hover:bg-red-950"
                                                 >
                                                     <Heart
                                                         className={`h-4.5 w-4.5 ${isFavorite
-                                                                ? 'fill-red-500 text-red-500'
-                                                                : 'text-gray-300 hover:text-red-400'
+                                                                ? 'fill-red-500 text-red-500 dark:text-red-400'
+                                                                : 'text-gray-300 dark:text-gray-600 hover:text-red-400 dark:hover:text-red-300'
                                                             }`}
                                                     />
                                                 </button>
@@ -1190,20 +1237,20 @@ export default function Home() {
                                                             openRatingPicker(store);
                                                         }
                                                     }}
-                                                    className="flex items-center gap-1 text-xs font-medium text-amber-500 whitespace-nowrap hover:text-amber-600"
+                                                    className="flex items-center gap-1 text-xs font-medium text-amber-500 whitespace-nowrap hover:text-amber-600 dark:hover:text-amber-400"
                                                 >
                                                     <Star className="h-3.5 w-3.5 fill-amber-400 text-amber-400" />
                                                     {(store.rating ?? 0) > 0 ? store.rating : '—'}
                                                     {(store.ratingCount ?? 0) > 0 && (
-                                                        <span className="text-gray-400">({store.ratingCount})</span>
+                                                        <span className="text-gray-400 dark:text-gray-500">({store.ratingCount})</span>
                                                     )}
                                                 </button>
                                                 {ratingPickerStoreId === store.id && (
                                                     <div
                                                         onClick={(e) => e.stopPropagation()}
-                                                        className="absolute right-0 z-20 mt-1 w-44 rounded-xl border border-gray-200 bg-white p-3 shadow-lg"
+                                                        className="absolute right-0 z-20 mt-1 w-44 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 p-3 shadow-lg"
                                                     >
-                                                        <p className="mb-2 text-xs font-medium text-gray-700">
+                                                        <p className="mb-2 text-xs font-medium text-gray-700 dark:text-gray-300">
                                                             Đánh giá của bạn
                                                         </p>
                                                         <div
@@ -1225,7 +1272,7 @@ export default function Home() {
                                                                         <Star
                                                                             className={`h-6 w-6 ${starValue <= activeValue
                                                                                     ? 'fill-amber-400 text-amber-400'
-                                                                                    : 'text-gray-300'
+                                                                                    : 'text-gray-300 dark:text-gray-600'
                                                                                 }`}
                                                                         />
                                                                     </button>
@@ -1233,14 +1280,14 @@ export default function Home() {
                                                             })}
                                                         </div>
                                                         {pickerMyRating !== null && (
-                                                            <p className="mt-2 text-[11px] text-gray-500">
+                                                            <p className="mt-2 text-[11px] text-gray-500 dark:text-gray-400">
                                                                 Bạn đã chấm {pickerMyRating} sao. Chấm lại để cập nhật.
                                                             </p>
                                                         )}
                                                         <button
                                                             type="button"
                                                             onClick={() => setRatingPickerStoreId(null)}
-                                                            className="mt-2 text-[11px] font-medium text-gray-500 hover:text-gray-700"
+                                                            className="mt-2 text-[11px] font-medium text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300"
                                                         >
                                                             Đóng
                                                         </button>
@@ -1255,23 +1302,23 @@ export default function Home() {
                                                 {visibleAmenities.map((amenityId) => (
                                                     <span
                                                         key={amenityId}
-                                                        className="rounded-full bg-gray-100 px-2 py-0.5 text-[11px] text-gray-600"
+                                                        className="rounded-full bg-gray-100 dark:bg-gray-800 px-2 py-0.5 text-[11px] text-gray-600 dark:text-gray-400"
                                                     >
                                                         {amenityNameById[amenityId] || amenityId}
                                                     </span>
                                                 ))}
                                                 {hiddenAmenityCount > 0 && (
-                                                    <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[11px] text-gray-500">
+                                                    <span className="rounded-full bg-gray-100 dark:bg-gray-800 px-2 py-0.5 text-[11px] text-gray-500 dark:text-gray-400">
                                                         +{hiddenAmenityCount}
                                                     </span>
                                                 )}
                                             </div>
                                         )}
 
-                                        <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs text-gray-600">
+                                        <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs text-gray-600 dark:text-gray-400">
                                             <span className="flex items-center gap-1.5">
                                                 <span
-                                                    className={`h-2 w-2 rounded-full ${store.isOpen ? 'bg-emerald-500' : 'bg-gray-300'}`}
+                                                    className={`h-2 w-2 rounded-full ${store.isOpen ? 'bg-emerald-500' : 'bg-gray-300 dark:bg-gray-600'}`}
                                                 />
                                                 {store.isOpen ? 'Đang mở' : 'Đã đóng'}
                                                 {store.is24h ? ' • 24/7' : store.openHours ? ` • ${store.openHours}` : ''}
@@ -1282,13 +1329,13 @@ export default function Home() {
                                                         e.stopPropagation();
                                                         openStoreDetails(store);
                                                     }}
-                                                    className="text-xs font-semibold text-gray-600 hover:text-gray-900 flex items-center gap-1 bg-gray-100 px-2.5 py-1.5 rounded-lg hover:bg-gray-200 transition"
+                                                    className="text-xs font-semibold text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100 flex items-center gap-1 bg-gray-100 dark:bg-gray-800 px-2.5 py-1.5 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-700 transition"
                                                 >
                                                     Chi tiết
                                                 </button>
                                                 <button
                                                     onClick={(e) => handleDirections(e, store)}
-                                                    className="text-xs font-semibold text-blue-600 hover:text-blue-800 flex items-center gap-1 bg-blue-50 px-2.5 py-1.5 rounded-lg hover:bg-blue-100 transition"
+                                                    className="text-xs font-semibold text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-200 flex items-center gap-1 bg-blue-50 dark:bg-blue-950 px-2.5 py-1.5 rounded-lg hover:bg-blue-100 dark:hover:bg-blue-900 transition"
                                                 >
                                                     <Navigation className="h-3.5 w-3.5" />
                                                     Chỉ đường
@@ -1311,20 +1358,20 @@ export default function Home() {
                 >
                     <div
                         onClick={(e) => e.stopPropagation()}
-                        className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-2xl border border-gray-200 bg-white p-6 shadow-2xl"
+                        className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 p-6 shadow-2xl"
                     >
                         <div className="flex items-start justify-between gap-3">
                             <div>
-                                <span className="inline-block rounded-full bg-blue-100 px-2.5 py-0.5 text-xs font-semibold text-blue-700">
+                                <span className="inline-block rounded-full bg-blue-100 dark:bg-blue-900 px-2.5 py-0.5 text-xs font-semibold text-blue-700 dark:text-blue-300">
                                     {getBrandName(detailsStore.brandId)}
                                 </span>
-                                <h2 className="mt-2 text-xl font-bold text-gray-900">{detailsStore.name}</h2>
+                                <h2 className="mt-2 text-xl font-bold text-gray-900 dark:text-gray-100">{detailsStore.name}</h2>
                             </div>
                             <button
                                 type="button"
                                 onClick={() => setDetailsStore(null)}
                                 aria-label="Đóng"
-                                className="rounded-lg p-1.5 text-gray-500 hover:bg-gray-100 hover:text-gray-700"
+                                className="rounded-lg p-1.5 text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-gray-700 dark:hover:text-gray-300"
                             >
                                 <X className="h-5 w-5" />
                             </button>
@@ -1336,51 +1383,51 @@ export default function Home() {
                                 {(detailsStore.rating ?? 0) > 0 ? detailsStore.rating : '—'}
                             </span>
                             {(detailsStore.ratingCount ?? 0) > 0 && (
-                                <span className="text-gray-500">({detailsStore.ratingCount} lượt đánh giá)</span>
+                                <span className="text-gray-500 dark:text-gray-400">({detailsStore.ratingCount} lượt đánh giá)</span>
                             )}
                             <span
                                 className={`ml-auto flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold ${detailsStore.isOpen
-                                        ? 'bg-emerald-100 text-emerald-700'
-                                        : 'bg-gray-100 text-gray-600'
+                                        ? 'bg-emerald-100 dark:bg-emerald-900 text-emerald-700 dark:text-emerald-300'
+                                        : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400'
                                     }`}
                             >
-                                <span className={`h-2 w-2 rounded-full ${detailsStore.isOpen ? 'bg-emerald-500' : 'bg-gray-400'}`} />
+                                <span className={`h-2 w-2 rounded-full ${detailsStore.isOpen ? 'bg-emerald-500' : 'bg-gray-400 dark:bg-gray-500'}`} />
                                 {detailsStore.isOpen ? 'Đang mở cửa' : 'Đã đóng cửa'}
                             </span>
                         </div>
 
-                        <div className="mt-4 space-y-2.5 text-sm text-gray-700">
+                        <div className="mt-4 space-y-2.5 text-sm text-gray-700 dark:text-gray-300">
                             <p className="flex items-start gap-2">
-                                <MapPin className="mt-0.5 h-4 w-4 shrink-0 text-gray-400" />
+                                <MapPin className="mt-0.5 h-4 w-4 shrink-0 text-gray-400 dark:text-gray-500" />
                                 {detailsStore.address}
                             </p>
                             {formatDistance(detailsStore.distanceMeters) && (
-                                <p className="flex items-center gap-2 font-medium text-blue-600">
-                                    <Navigation className="h-4 w-4 shrink-0 text-gray-400" />
+                                <p className="flex items-center gap-2 font-medium text-blue-600 dark:text-blue-400">
+                                    <Navigation className="h-4 w-4 shrink-0 text-gray-400 dark:text-gray-500" />
                                     {formatDistance(detailsStore.distanceMeters)}
                                 </p>
                             )}
                             <p className="flex items-center gap-2">
-                                <Clock className="h-4 w-4 shrink-0 text-gray-400" />
+                                <Clock className="h-4 w-4 shrink-0 text-gray-400 dark:text-gray-500" />
                                 {detailsStore.is24h
                                     ? 'Mở cửa 24/7'
                                     : detailsStore.openHours
                                         ? `Giờ mở cửa: ${detailsStore.openHours} (giờ Việt Nam)`
                                         : 'Giờ mở cửa: đang cập nhật'}
                             </p>
-                            <p className="text-xs text-gray-400">
+                            <p className="text-xs text-gray-400 dark:text-gray-500">
                                 Tọa độ: {detailsStore.lat.toFixed(5)}, {detailsStore.lng.toFixed(5)}
                             </p>
                         </div>
 
                         {(detailsStore.amenities?.length ?? 0) > 0 && (
                             <div className="mt-4">
-                                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">Tiện ích</p>
+                                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Tiện ích</p>
                                 <div className="flex flex-wrap gap-1.5">
                                     {detailsStore.amenities!.map((amenityId) => (
                                         <span
                                             key={amenityId}
-                                            className="rounded-full bg-blue-50 px-2.5 py-1 text-xs font-medium text-blue-700"
+                                            className="rounded-full bg-blue-50 dark:bg-blue-950 px-2.5 py-1 text-xs font-medium text-blue-700 dark:text-blue-300"
                                         >
                                             {amenityNameById[amenityId] || amenityId}
                                         </span>
@@ -1405,12 +1452,12 @@ export default function Home() {
                                 type="button"
                                 onClick={() => toggleFavorite(detailsStore)}
                                 className={`flex flex-1 items-center justify-center gap-1.5 rounded-xl px-4 py-2.5 text-sm font-semibold transition ${favoriteIds.includes(detailsStore.id)
-                                        ? 'bg-red-50 text-red-600 hover:bg-red-100'
-                                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                                        ? 'bg-red-50 dark:bg-red-950 text-red-600 dark:text-red-400 hover:bg-red-100 dark:hover:bg-red-900'
+                                        : 'bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700'
                                     }`}
                             >
                                 <Heart
-                                    className={`h-4 w-4 ${favoriteIds.includes(detailsStore.id) ? 'fill-red-500 text-red-500' : ''}`}
+                                    className={`h-4 w-4 ${favoriteIds.includes(detailsStore.id) ? 'fill-red-500 text-red-500 dark:text-red-400' : ''}`}
                                 />
                                 {favoriteIds.includes(detailsStore.id) ? 'Đã yêu thích' : 'Yêu thích'}
                             </button>
@@ -1421,16 +1468,16 @@ export default function Home() {
 
             {isAuthModalOpen && (
                 <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-900/50 p-4">
-                    <div className="w-full max-w-md rounded-2xl border border-gray-200 bg-white p-6 shadow-2xl">
+                    <div className="w-full max-w-md rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 p-6 shadow-2xl">
                         <div className="mb-5 flex items-center justify-between">
-                            <h2 className="text-xl font-bold text-gray-900">
+                            <h2 className="text-xl font-bold text-gray-900 dark:text-gray-100">
                                 {authMode === 'login' ? 'Đăng nhập tài khoản' : 'Đăng ký tài khoản'}
                             </h2>
                             <button
                                 type="button"
                                 onClick={() => setIsAuthModalOpen(false)}
                                 aria-label="Đóng"
-                                className="rounded-lg p-1.5 text-gray-500 hover:bg-gray-100 hover:text-gray-700"
+                                className="rounded-lg p-1.5 text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-gray-700 dark:hover:text-gray-300"
                             >
                                 <X className="h-5 w-5" />
                             </button>
@@ -1439,21 +1486,21 @@ export default function Home() {
                         {authMode === 'login' ? (
                             <div className="space-y-4">
                                 <div>
-                                    <label className="mb-1.5 block text-sm font-medium text-gray-700">Tài khoản:</label>
+                                    <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">Tài khoản:</label>
                                     <input
                                         value={loginForm.email}
                                         onChange={(e) => setLoginForm({ ...loginForm, email: e.target.value })}
-                                        className="w-full rounded-xl border border-gray-300 bg-white px-4 py-2.5 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-200"
+                                        className="w-full rounded-xl border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-4 py-2.5 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-200 dark:focus:ring-blue-800"
                                     />
                                 </div>
 
                                 <div>
-                                    <label className="mb-1.5 block text-sm font-medium text-gray-700">Mật khẩu:</label>
+                                    <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">Mật khẩu:</label>
                                     <input
                                         type="password"
                                         value={loginForm.password}
                                         onChange={(e) => setLoginForm({ ...loginForm, password: e.target.value })}
-                                        className="w-full rounded-xl border border-gray-300 bg-white px-4 py-2.5 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-200"
+                                        className="w-full rounded-xl border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-4 py-2.5 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-200 dark:focus:ring-blue-800"
                                     />
                                 </div>
 
@@ -1465,12 +1512,12 @@ export default function Home() {
                                     Đăng nhập
                                 </button>
 
-                                <div className="text-center text-base text-gray-900">
+                                <div className="text-center text-base text-gray-900 dark:text-gray-100">
                                     <span>Bạn chưa có tài khoản? </span>
                                     <button
                                         type="button"
                                         onClick={() => setAuthMode('register')}
-                                        className="font-semibold text-blue-600 underline hover:text-blue-800"
+                                        className="font-semibold text-blue-600 dark:text-blue-400 underline hover:text-blue-800 dark:hover:text-blue-200"
                                     >
                                         Đăng ký tài khoản mới
                                     </button>
@@ -1479,40 +1526,40 @@ export default function Home() {
                         ) : (
                             <div className="space-y-4">
                                 <div>
-                                    <label className="mb-1.5 block text-sm font-medium text-gray-700">Họ và tên:</label>
+                                    <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">Họ và tên:</label>
                                     <input
                                         value={registerForm.fullName}
                                         onChange={(e) => setRegisterForm({ ...registerForm, fullName: e.target.value })}
-                                        className="w-full rounded-xl border border-gray-300 bg-white px-4 py-2.5 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-200"
+                                        className="w-full rounded-xl border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-4 py-2.5 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-200 dark:focus:ring-blue-800"
                                     />
                                 </div>
 
                                 <div>
-                                    <label className="mb-1.5 block text-sm font-medium text-gray-700">Tài khoản:</label>
+                                    <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">Tài khoản:</label>
                                     <input
                                         value={registerForm.email}
                                         onChange={(e) => setRegisterForm({ ...registerForm, email: e.target.value })}
-                                        className="w-full rounded-xl border border-gray-300 bg-white px-4 py-2.5 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-200"
+                                        className="w-full rounded-xl border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-4 py-2.5 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-200 dark:focus:ring-blue-800"
                                     />
                                 </div>
 
                                 <div>
-                                    <label className="mb-1.5 block text-sm font-medium text-gray-700">Mật khẩu:</label>
+                                    <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">Mật khẩu:</label>
                                     <input
                                         type="password"
                                         value={registerForm.password}
                                         onChange={(e) => setRegisterForm({ ...registerForm, password: e.target.value })}
-                                        className="w-full rounded-xl border border-gray-300 bg-white px-4 py-2.5 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-200"
+                                        className="w-full rounded-xl border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-4 py-2.5 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-200 dark:focus:ring-blue-800"
                                     />
                                 </div>
 
                                 <div>
-                                    <label className="mb-1.5 block text-sm font-medium text-gray-700">Xác nhận mật khẩu:</label>
+                                    <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">Xác nhận mật khẩu:</label>
                                     <input
                                         type="password"
                                         value={registerForm.confirmPassword}
                                         onChange={(e) => setRegisterForm({ ...registerForm, confirmPassword: e.target.value })}
-                                        className="w-full rounded-xl border border-gray-300 bg-white px-4 py-2.5 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-200"
+                                        className="w-full rounded-xl border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-4 py-2.5 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-200 dark:focus:ring-blue-800"
                                     />
                                 </div>
 
@@ -1528,7 +1575,7 @@ export default function Home() {
                                     <button
                                         type="button"
                                         onClick={() => setAuthMode('login')}
-                                        className="text-base font-semibold text-blue-600 underline hover:text-blue-800"
+                                        className="text-base font-semibold text-blue-600 dark:text-blue-400 underline hover:text-blue-800 dark:hover:text-blue-200"
                                     >
                                         Quay lại đăng nhập
                                     </button>
@@ -1538,12 +1585,12 @@ export default function Home() {
                     </div>
                 </div>
             )}
-            <footer className="mx-auto mt-10 max-w-7xl border-t border-gray-200 px-2 py-6 text-center">
-                <p className="flex items-center justify-center gap-1.5 text-sm font-semibold text-gray-700">
-                    <MapPin className="h-4 w-4 text-blue-600" />
+            <footer className="mx-auto mt-10 max-w-7xl border-t border-gray-200 dark:border-gray-700 px-2 py-6 text-center">
+                <p className="flex items-center justify-center gap-1.5 text-sm font-semibold text-gray-700 dark:text-gray-300">
+                    <MapPin className="h-4 w-4 text-blue-600 dark:text-blue-400" />
                     ConvenienceFinder
                 </p>
-                <p className="mt-1.5 text-xs text-gray-500">
+                <p className="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
                     Dữ liệu bản đồ © OpenStreetMap contributors • Vị trí của bạn chỉ dùng để tìm kiếm
                 </p>
             </footer>
