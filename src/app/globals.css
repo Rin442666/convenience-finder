@@ -3,3 +3,43 @@
 body {
     background-color: #f9fafb;
 }
+
+::selection {
+    background-color: #dbeafe;
+    color: #1e3a8a;
+}
+
+/* Thanh cuộn mảnh, gọn gàng */
+* {
+    scrollbar-width: thin;
+    scrollbar-color: #cbd5e1 transparent;
+}
+
+*::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+*::-webkit-scrollbar-thumb {
+    background-color: #cbd5e1;
+    border-radius: 8px;
+}
+
+*::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+@keyframes toast-in {
+    from {
+        opacity: 0;
+        transform: translateY(8px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.toast-in {
+    animation: toast-in 0.18s ease-out;
+}

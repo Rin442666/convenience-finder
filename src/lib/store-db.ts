@@ -169,10 +169,194 @@ export const initialStoreSeed: StoreRecord[] = [
     openHours: '24/7',
     amenities: ['wifi', 'seating', 'cashless'],
   },
+  // --- Dữ liệu mẫu mở rộng rải khắp Hà Nội (đợt 2) ---
+  {
+    id: 'store-9',
+    brandId: 'circle-k',
+    name: 'Circle K Hàng Bài',
+    address: 'Số 45, Phố Hàng Bài, Hoàn Kiếm, Hà Nội',
+    lat: 21.0243,
+    lng: 105.8536,
+    rating: 4.6,
+    isOpen: true,
+    is24h: true,
+    openHours: '24/7',
+    amenities: ['wifi', 'cashless', 'wc'],
+  },
+  {
+    id: 'store-10',
+    brandId: 'winmart',
+    name: 'WinMart+ Tràng Tiền',
+    address: 'Số 12, Phố Tràng Tiền, Hoàn Kiếm, Hà Nội',
+    lat: 21.0243,
+    lng: 105.8575,
+    rating: 4.4,
+    isOpen: true,
+    is24h: false,
+    openHours: '06:00-23:00',
+    amenities: ['cashless', 'parking'],
+  },
+  {
+    id: 'store-11',
+    brandId: 'gs25',
+    name: 'GS25 Lý Thường Kiệt',
+    address: 'Số 28, Phố Lý Thường Kiệt, Hoàn Kiếm, Hà Nội',
+    lat: 21.0225,
+    lng: 105.8485,
+    rating: 4.8,
+    isOpen: true,
+    is24h: true,
+    openHours: '24/7',
+    amenities: ['wifi', 'seating', 'cashless', 'wc'],
+  },
+  {
+    id: 'store-12',
+    brandId: 'familymart',
+    name: 'FamilyMart Kim Mã',
+    address: 'Số 360, Phố Kim Mã, Ba Đình, Hà Nội',
+    lat: 21.029,
+    lng: 105.816,
+    rating: 4.3,
+    isOpen: true,
+    is24h: false,
+    openHours: '07:00-23:00',
+    amenities: ['wifi', 'seating'],
+  },
+  {
+    id: 'store-13',
+    brandId: '7-eleven',
+    name: '7-Eleven Liễu Giai',
+    address: 'Số 15, Phố Liễu Giai, Ba Đình, Hà Nội',
+    lat: 21.0335,
+    lng: 105.8095,
+    rating: 4.5,
+    isOpen: true,
+    is24h: true,
+    openHours: '24/7',
+    amenities: ['wifi', 'cashless', 'parking'],
+  },
+  {
+    id: 'store-14',
+    brandId: 'circle-k',
+    name: 'Circle K Tây Sơn',
+    address: 'Số 210, Phố Tây Sơn, Đống Đa, Hà Nội',
+    lat: 21.0125,
+    lng: 105.8245,
+    rating: 4.4,
+    isOpen: true,
+    is24h: false,
+    openHours: '22:00-06:00',
+    amenities: ['wifi', 'overnight', 'cashless'],
+  },
+  {
+    id: 'store-15',
+    brandId: 'winmart',
+    name: 'WinMart+ Chùa Bộc',
+    address: 'Số 68, Phố Chùa Bộc, Đống Đa, Hà Nội',
+    lat: 21.0085,
+    lng: 105.8275,
+    rating: 4.2,
+    isOpen: true,
+    is24h: false,
+    openHours: '06:30-22:30',
+    amenities: ['cashless', 'seating'],
+  },
+  {
+    id: 'store-16',
+    brandId: 'gs25',
+    name: 'GS25 Bạch Mai',
+    address: 'Số 175, Phố Bạch Mai, Hai Bà Trưng, Hà Nội',
+    lat: 21.0075,
+    lng: 105.8475,
+    rating: 4.6,
+    isOpen: true,
+    is24h: true,
+    openHours: '24/7',
+    amenities: ['wifi', 'wc', 'cashless'],
+  },
+  {
+    id: 'store-17',
+    brandId: 'familymart',
+    name: 'FamilyMart Minh Khai',
+    address: 'Số 422, Phố Minh Khai, Hai Bà Trưng, Hà Nội',
+    lat: 21.0055,
+    lng: 105.857,
+    rating: 4.3,
+    isOpen: true,
+    is24h: false,
+    openHours: '08:00-22:00',
+    amenities: ['parking', 'seating'],
+  },
+  {
+    id: 'store-18',
+    brandId: 'circle-k',
+    name: 'Circle K Lạc Long Quân',
+    address: 'Số 88, Phố Lạc Long Quân, Tây Hồ, Hà Nội',
+    lat: 21.0515,
+    lng: 105.811,
+    rating: 4.5,
+    isOpen: true,
+    is24h: true,
+    openHours: '24/7',
+    amenities: ['wifi', 'parking', 'cashless'],
+  },
+  {
+    id: 'store-19',
+    brandId: 'winmart',
+    name: 'WinMart+ Hoàng Quốc Việt',
+    address: 'Số 105, Phố Hoàng Quốc Việt, Bắc Từ Liêm, Hà Nội',
+    lat: 21.0455,
+    lng: 105.7975,
+    rating: 4.4,
+    isOpen: true,
+    is24h: false,
+    openHours: '06:00-22:00',
+    amenities: ['cashless', 'parking', 'wc'],
+  },
+  {
+    id: 'store-20',
+    brandId: '7-eleven',
+    name: '7-Eleven Nguyễn Trãi',
+    address: 'Số 250, Phố Nguyễn Trãi, Thanh Xuân, Hà Nội',
+    lat: 20.9995,
+    lng: 105.8155,
+    rating: 4.6,
+    isOpen: true,
+    is24h: true,
+    openHours: '24/7',
+    amenities: ['wifi', 'seating', 'cashless'],
+  },
 ];
 
-export function haversineDistanceMeters(lat1: number, lng1: number, lat2: number, lng2: number): number {
-  const toRad = (value: number) => (value * Math.PI) / 180;
+// Tính trạng thái mở/đóng theo giờ hiện tại từ chuỗi openHours ("06:00-23:00").
+// Xử lý cả khung giờ qua đêm ("22:00-06:00"). Nếu không parse được giờ thì
+// giữ nguyên giá trị isOpen có sẵn (dữ liệu DB hoặc Google Places).
+export function computeIsOpenNow(store: { isOpen: boolean; is24h: boolean; openHours?: string }): boolean {
+    if (store.is24h) {
+        return true;
+    }
+    const match = (store.openHours || '').match(/(\d{1,2}):(\d{2})\s*-\s*(\d{1,2}):(\d{2})/);
+    if (!match) {
+        return store.isOpen;
+    }
+    const openMinutes = Number(match[1]) * 60 + Number(match[2]);
+    const closeMinutes = Number(match[3]) * 60 + Number(match[4]);
+    if (
+        !Number.isFinite(openMinutes) || !Number.isFinite(closeMinutes) ||
+        openMinutes < 0 || openMinutes >= 1440 || closeMinutes < 0 || closeMinutes >= 1440
+    ) {
+        return store.isOpen;
+    }
+    const now = new Date();
+    const nowMinutes = now.getHours() * 60 + now.getMinutes();
+    if (closeMinutes > openMinutes) {
+        return nowMinutes >= openMinutes && nowMinutes < closeMinutes;
+    }
+    // Khung giờ qua đêm, ví dụ 22:00-06:00.
+    return nowMinutes >= openMinutes || nowMinutes < closeMinutes;
+}
+
+export function haversineDistanceMeters(lat1: number, lng1: number, lat2: number, lng2: number): number {  const toRad = (value: number) => (value * Math.PI) / 180;
   const earthRadius = 6371000;
   const dLat = toRad(lat2 - lat1);
   const dLng = toRad(lng2 - lng1);
@@ -343,6 +527,8 @@ export async function queryStoresFromDatabase(filters: StoreFilters): Promise<St
     return mapped
       .map((store: StoreRecord) => ({
         ...store,
+        // Ưu tiên giờ mở cửa thực tế thay vì cột IsOpen có thể đã cũ trong DB.
+        isOpen: computeIsOpenNow(store),
         distanceMeters: haversineDistanceMeters(filters.lat, filters.lng, store.lat, store.lng),
       }))
       .filter((store: StoreRecord & { distanceMeters: number }) => {
@@ -383,6 +569,8 @@ export function queryStores(filters: StoreFilters): StoreRecord[] {
   return initialStoreSeed
     .map((store) => ({
       ...store,
+      // Ghi đè trạng thái mở/đóng theo giờ hiện tại thay vì dùng giá trị cứng trong seed.
+      isOpen: computeIsOpenNow(store),
       distanceMeters: haversineDistanceMeters(lat, lng, store.lat, store.lng),
     }))
     .filter((store) => {
