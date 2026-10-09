@@ -49,26 +49,9 @@ export const permissionByRole: Record<UserRole, Permission[]> = {
   ],
 };
 
-export const demoUsers: AppUser[] = [
-  {
-    id: 'user-001',
-    fullName: 'Nguyễn Văn User',
-    email: 'user@finder.local',
-    password: '123456',
-    role: 'user',
-    permissions: permissionByRole.user,
-    isActive: true,
-  },
-  {
-    id: 'admin-001',
-    fullName: 'Quản trị viên',
-    email: 'admin@finder.local',
-    password: 'admin123',
-    role: 'admin',
-    permissions: permissionByRole.admin,
-    isActive: true,
-  },
-];
+// Tài khoản demo và logic đăng nhập đã chuyển sang `server-auth.ts`
+// (mật khẩu hash + session token). File này chỉ giữ type, quyền
+// và logic nghiệp vụ của store requests.
 
 const storeRequests: StoreRequestRecord[] = [
   {
@@ -86,21 +69,6 @@ const storeRequests: StoreRequestRecord[] = [
     createdAt: new Date().toISOString(),
   },
 ];
-
-export function loginDemoUser(email: string, password: string): AppUser | null {
-  const user = demoUsers.find(
-    (item) => item.email.toLowerCase() === email.trim().toLowerCase() && item.password === password
-  );
-
-  if (!user || !user.isActive) {
-    return null;
-  }
-
-  return {
-    ...user,
-    permissions: [...user.permissions],
-  };
-}
 
 export function hasPermission(user: Partial<AppUser> | null | undefined, permission: Permission): boolean {
   if (!user || !user.role) {

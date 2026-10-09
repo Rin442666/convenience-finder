@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { loginDemoUser } from '@/lib/auth-system';
+import { createSessionToken, loginServerUser, toPublicUser } from '@/lib/server-auth';
 
 export async function POST(request: Request) {
   try {
@@ -7,7 +7,7 @@ export async function POST(request: Request) {
     const email = String(body?.email || '').trim();
     const password = String(body?.password || '');
 
-    const user = loginDemoUser(email, password);
+    const user = loginServerUser(email, password);
 
     if (!user) {
       return NextResponse.json(
@@ -17,15 +17,10 @@ export async function POST(request: Request) {
     }
 
     return NextResponse.json({
-      user: {
-        id: user.id,
-        fullName: user.fullName,
-        email: user.email,
-        role: user.role,
-        permissions: user.permissions,
-      },
+      token: createSessionToken(user),
+      user: toPublicUser(user),
     });
-  } catch (error) {
+  } catch {
     return NextResponse.json(
       { message: 'Không thể xác thực người dùng.' },
       { status: 500 }

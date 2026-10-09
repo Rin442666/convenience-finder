@@ -1,5 +1,11 @@
 ﻿import { NextResponse } from 'next/server';
-import { getStoreCatalog, getStoreCatalogFromDatabase, queryStores, queryStoresFromDatabase } from '@/lib/store-db';
+import {
+  getStoreCatalog,
+  getStoreCatalogFromDatabase,
+  haversineDistanceMeters,
+  queryStores,
+  queryStoresFromDatabase,
+} from '@/lib/store-db';
 
 function parseArrayParam(value: string | null): string[] {
     if (!value) {
@@ -10,6 +16,57 @@ function parseArrayParam(value: string | null): string[] {
         .split(',')
         .map((item) => item.trim())
         .filter(Boolean);
+}
+
+// Kiểu tối thiểu của một kết quả Google Places Nearby Search
+// (chỉ khai báo các field mà code đang dùng).
+type GooglePlaceResult = {
+    place_id: string;
+    name?: string;
+    vicinity?: string;
+    rating?: number;
+    geometry: {
+        location: {
+            lat: number;
+            lng: number;
+        };
+    };
+    opening_hours?: {
+        open_now?: boolean;
+        weekday_text?: unknown;
+    };
+};
+
+// Đoán thương hiệu từ tên địa điểm trả về bởi Google Places.
+// Không đoán được thì trả về 'other' (hiển thị khi lọc "Tất cả").
+function inferBrandId(placeName: string): string {
+    const normalized = placeName.toLowerCase();
+    if (normalized.includes('circle k')) {
+        return 'circle-k';
+    }
+    if (normalized.includes('winmart') || normalized.includes('win mart')) {
+        return 'winmart';
+    }
+    if (normalized.includes('gs25') || normalized.includes('gs 25')) {
+        return 'gs25';
+    }
+    if (normalized.includes('familymart') || normalized.includes('family mart')) {
+        return 'familymart';
+    }
+    if (normalized.includes('7-eleven') || normalized.includes('7 eleven')) {
+        return '7-eleven';
+    }
+    return 'other';
+}
+
+// Kiểm tra có phải mở 24/7 thật không dựa trên weekday_text
+// (ví dụ: "Monday: Open 24 hours"). Không suy ra từ open_now.
+function isOpen24Hours(place: { opening_hours?: { weekday_text?: unknown } } | null | undefined): boolean {
+    const weekdayText = place?.opening_hours?.weekday_text;
+    if (!Array.isArray(weekdayText) || weekdayText.length === 0) {
+        return false;
+    }
+    return weekdayText.every((line) => typeof line === 'string' && /24 hours/i.test(line));
 }
 
 export async function GET(request: Request) {
@@ -31,18 +88,45 @@ export async function GET(request: Request) {
             const data = await res.json();
 
             if (data.status === 'OK' && data.results && data.results.length > 0) {
-                const stores = data.results.map((place: any) => ({
-                    id: place.place_id,
-                    name: place.name,
-                    address: place.vicinity || 'Địa chỉ đang cập nhật',
-                    lat: place.geometry.location.lat,
-                    lng: place.geometry.location.lng,
-                    rating: place.rating || 4.2,
-                    isOpen: place.opening_hours ? place.opening_hours.open_now : true,
-                    is24h: place.opening_hours ? place.opening_hours.open_now : true,
-                    amenities: ['wifi'],
-                    brandId: 'circle-k',
-                }));
+                const normalizedSearch = search.trim().toLowerCase();
+
+                const stores = data.results
+                    .map((place: GooglePlaceResult) => {
+                        const placeLat = place.geometry.location.lat;
+                        const placeLng = place.geometry.location.lng;
+                        const openNow = place.opening_hours ? !!place.opening_hours.open_now : true;
+
+                        return {
+                            id: place.place_id,
+                            name: place.name,
+                            address: place.vicinity || 'Địa chỉ đang cập nhật',
+                            lat: placeLat,
+                            lng: placeLng,
+                            rating: typeof place.rating === 'number' ? place.rating : 0,
+                            isOpen: openNow,
+                            is24h: isOpen24Hours(place),
+                            // Google Places không trả về tiện ích chi tiết nên để mảng rỗng
+                            // thay vì gán cứng — filter tiện ích sẽ loại các kết quả này
+                            // một cách trung thực khi người dùng có chọn tiện ích.
+                            amenities: [] as string[],
+                            brandId: inferBrandId(place.name || ''),
+                            distanceMeters: haversineDistanceMeters(lat, lng, placeLat, placeLng),
+                        };
+                    })
+                    .filter((store: { distanceMeters: number; brandId: string; amenities: string[]; isOpen: boolean; is24h: boolean; name: string; address: string }) => {
+                        const withinRadius = store.distanceMeters <= radius;
+                        const matchesBrand = brandIds.length === 0 || brandIds.includes(store.brandId);
+                        const matchesAmenity =
+                            amenityIds.length === 0 || amenityIds.every((amenityId) => store.amenities.includes(amenityId));
+                        const matchesOpen = !openOnly || store.isOpen || store.is24h;
+                        const matchesSearch =
+                            normalizedSearch.length === 0 ||
+                            store.name.toLowerCase().includes(normalizedSearch) ||
+                            store.address.toLowerCase().includes(normalizedSearch);
+
+                        return withinRadius && matchesBrand && matchesAmenity && matchesOpen && matchesSearch;
+                    })
+                    .sort((a: { distanceMeters: number }, b: { distanceMeters: number }) => a.distanceMeters - b.distanceMeters);
 
                 return NextResponse.json({ stores, brands: getStoreCatalog().brands, amenities: getStoreCatalog().amenities });
             }

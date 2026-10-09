@@ -10,6 +10,17 @@ interface MapViewProps {
   onMapMoveEnd?: (newCenter: UserLocation) => void;
 }
 
+// Escape HTML để chống XSS khi tên/địa chỉ cửa hàng chứa ký tự đặc biệt
+// (dữ liệu có thể đến từ yêu cầu do người dùng gửi lên).
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 export default function MapView({ center, stores, selectedStore, onMapMoveEnd }: MapViewProps) {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<any>(null);
@@ -81,8 +92,8 @@ export default function MapView({ center, stores, selectedStore, onMapMoveEnd }:
             .addTo(markersGroupRef.current)
             .bindPopup(`
               <div style="font-family: sans-serif;">
-                <strong>${store.name}</strong><br/>
-                <small>${store.address}</small>
+                <strong>${escapeHtml(store.name)}</strong><br/>
+                <small>${escapeHtml(store.address)}</small>
               </div>
             `);
         }

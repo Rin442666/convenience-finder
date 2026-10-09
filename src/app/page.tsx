@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import MapView from '@/components/MapView';
-import { AppUser, demoUsers, getRoleLabel, hasPermission, permissionByRole } from '@/lib/auth-system';
+import { AppUser, getRoleLabel, hasPermission } from '@/lib/auth-system';
 import { Store, UserLocation } from '@/types/store';
 
 const brandOptions = [
@@ -23,42 +23,59 @@ const amenityOptions = [
     { id: 'overnight', name: 'Cho phép qua đêm' },
 ];
 
-const STORAGE_USERS_KEY = 'finder_users';
-const STORAGE_SESSION_KEY = 'finder_current_user';
+const STORAGE_SESSION_KEY = 'finder_session';
 
 type AuthMode = 'login' | 'register';
 type MainView = 'main' | 'profile' | 'store-request';
 
-function getRegisteredUsers(): AppUser[] {
-    if (typeof window === 'undefined') {
-        return demoUsers;
-    }
+// Session lưu ở client chỉ gồm token + thông tin công khai của user,
+// KHÔNG bao giờ chứa password.
+type SessionData = {
+    token: string;
+    user: Omit<AppUser, 'password'>;
+};
 
-    const saved = window.localStorage.getItem(STORAGE_USERS_KEY);
-    if (!saved) {
-        window.localStorage.setItem(STORAGE_USERS_KEY, JSON.stringify(demoUsers));
-        return demoUsers;
+function loadSession(): SessionData | null {
+    if (typeof window === 'undefined') {
+        return null;
     }
 
     try {
-        return JSON.parse(saved) as AppUser[];
+        const saved = window.localStorage.getItem(STORAGE_SESSION_KEY);
+        if (!saved) {
+            return null;
+        }
+        const parsed = JSON.parse(saved) as SessionData;
+        if (!parsed?.token || !parsed?.user?.id) {
+            return null;
+        }
+        return parsed;
     } catch {
-        window.localStorage.setItem(STORAGE_USERS_KEY, JSON.stringify(demoUsers));
-        return demoUsers;
+        window.localStorage.removeItem(STORAGE_SESSION_KEY);
+        return null;
     }
 }
 
-function persistUserSession(user: AppUser | null) {
+function persistSession(session: SessionData | null) {
     if (typeof window === 'undefined') {
         return;
     }
 
-    if (!user) {
+    if (!session) {
         window.localStorage.removeItem(STORAGE_SESSION_KEY);
         return;
     }
 
-    window.localStorage.setItem(STORAGE_SESSION_KEY, JSON.stringify(user));
+    window.localStorage.setItem(STORAGE_SESSION_KEY, JSON.stringify(session));
+}
+
+// Dọn dữ liệu của phiên bản cũ (từng lưu cả password trong localStorage).
+function clearLegacyAuthData() {
+    if (typeof window === 'undefined') {
+        return;
+    }
+    window.localStorage.removeItem('finder_users');
+    window.localStorage.removeItem('finder_current_user');
 }
 
 export default function Home() {
@@ -73,12 +90,13 @@ export default function Home() {
     const [selectedBrand, setSelectedBrand] = useState<string>('all');
     const [selectedAmenities, setSelectedAmenities] = useState<string[]>([]);
     const [openOnly, setOpenOnly] = useState<boolean>(false);
-    const [currentUser, setCurrentUser] = useState<AppUser | null>(null);
+    const [currentUser, setCurrentUser] = useState<Omit<AppUser, 'password'> | null>(null);
+    const [authToken, setAuthToken] = useState<string | null>(null);
     const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
     const [authMode, setAuthMode] = useState<AuthMode>('login');
     const [accountMenuOpen, setAccountMenuOpen] = useState(false);
     const [mainView, setMainView] = useState<MainView>('main');
-    const [loginForm, setLoginForm] = useState({ email: 'user@finder.local', password: '123456' });
+    const [loginForm, setLoginForm] = useState({ email: '', password: '' });
     const [registerForm, setRegisterForm] = useState({ fullName: '', email: '', password: '', confirmPassword: '' });
     const [storeRequestForm, setStoreRequestForm] = useState({
         storeName: '',
@@ -91,18 +109,11 @@ export default function Home() {
     const [pendingRequests, setPendingRequests] = useState<any[]>([]);
 
     useEffect(() => {
-        if (typeof window === 'undefined') {
-            return;
-        }
-
-        const savedUser = window.localStorage.getItem(STORAGE_SESSION_KEY);
-        if (savedUser) {
-            try {
-                const parsed = JSON.parse(savedUser) as AppUser;
-                setCurrentUser(parsed);
-            } catch {
-                window.localStorage.removeItem(STORAGE_SESSION_KEY);
-            }
+        clearLegacyAuthData();
+        const saved = loadSession();
+        if (saved) {
+            setCurrentUser(saved.user);
+            setAuthToken(saved.token);
         }
     }, []);
 
@@ -127,7 +138,9 @@ export default function Home() {
 
         async function fetchPendingRequests() {
             try {
-                const res = await fetch('/api/store-requests?role=admin');
+                const res = await fetch('/api/store-requests', {
+                    headers: authToken ? { Authorization: `Bearer ${authToken}` } : {},
+                });
                 const data = await res.json();
                 setPendingRequests(data.requests || []);
             } catch (error) {
@@ -136,7 +149,7 @@ export default function Home() {
         }
 
         fetchPendingRequests();
-    }, [currentUser]);
+    }, [currentUser, authToken]);
 
     useEffect(() => {
         async function fetchStores() {
@@ -180,24 +193,35 @@ export default function Home() {
     };
 
     const handleLogin = async () => {
-        const users = getRegisteredUsers();
-        const matchedUser = users.find(
-            (user) => user.email.toLowerCase() === loginForm.email.trim().toLowerCase() && user.password === loginForm.password
-        );
+        try {
+            const res = await fetch('/api/auth', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    email: loginForm.email.trim(),
+                    password: loginForm.password,
+                }),
+            });
 
-        if (!matchedUser) {
-            alert('Email hoặc mật khẩu không đúng.');
-            return;
+            const data = await res.json();
+            if (!res.ok || !data.token) {
+                alert(data.message || 'Email hoặc mật khẩu không đúng.');
+                return;
+            }
+
+            setCurrentUser(data.user);
+            setAuthToken(data.token);
+            persistSession({ token: data.token, user: data.user });
+            setIsAuthModalOpen(false);
+            setAccountMenuOpen(false);
+            setAuthMode('login');
+        } catch (error) {
+            console.error('Lỗi đăng nhập:', error);
+            alert('Không thể đăng nhập. Vui lòng thử lại.');
         }
-
-        setCurrentUser(matchedUser);
-        persistUserSession(matchedUser);
-        setIsAuthModalOpen(false);
-        setAccountMenuOpen(false);
-        setAuthMode('login');
     };
 
-    const handleRegister = () => {
+    const handleRegister = async () => {
         const trimmedName = registerForm.fullName.trim();
         const email = registerForm.email.trim();
         const password = registerForm.password;
@@ -217,35 +241,38 @@ export default function Home() {
             return;
         }
 
-        const users = getRegisteredUsers();
-        const alreadyExists = users.some((user) => user.email.toLowerCase() === email.toLowerCase());
+        try {
+            const res = await fetch('/api/auth/register', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ fullName: trimmedName, email, password }),
+            });
 
-        if (alreadyExists) {
-            alert('Tài khoản này đã tồn tại trong hệ thống.');
-            return;
+            const data = await res.json();
+            if (!res.ok || !data.token) {
+                alert(data.message || 'Không thể đăng ký tài khoản.');
+                return;
+            }
+
+            // Đăng ký xong tự động đăng nhập
+            setCurrentUser(data.user);
+            setAuthToken(data.token);
+            persistSession({ token: data.token, user: data.user });
+            setIsAuthModalOpen(false);
+            setAuthMode('login');
+            setLoginForm({ email: '', password: '' });
+            setRegisterForm({ fullName: '', email: '', password: '', confirmPassword: '' });
+            alert('Đăng ký thành công!');
+        } catch (error) {
+            console.error('Lỗi đăng ký:', error);
+            alert('Không thể đăng ký. Vui lòng thử lại.');
         }
-
-        const newUser: AppUser = {
-            id: `user-${Date.now()}`,
-            fullName: trimmedName,
-            email,
-            password,
-            role: 'user',
-            permissions: permissionByRole.user,
-            isActive: true,
-        };
-
-        const nextUsers = [...users, newUser];
-        window.localStorage.setItem(STORAGE_USERS_KEY, JSON.stringify(nextUsers));
-        setAuthMode('login');
-        setLoginForm({ email, password });
-        setRegisterForm({ fullName: '', email: '', password: '', confirmPassword: '' });
-        alert('Đăng ký thành công. Vui lòng đăng nhập.');
     };
 
     const handleLogout = () => {
         setCurrentUser(null);
-        persistUserSession(null);
+        setAuthToken(null);
+        persistSession(null);
         setAccountMenuOpen(false);
         setMainView('main');
     };
@@ -264,9 +291,11 @@ export default function Home() {
         try {
             const res = await fetch('/api/store-requests', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: {
+                    'Content-Type': 'application/json',
+                    ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
+                },
                 body: JSON.stringify({
-                    user: currentUser,
                     storeName: storeRequestForm.storeName,
                     brandName: storeRequestForm.brandName,
                     address: storeRequestForm.address,
@@ -308,9 +337,11 @@ export default function Home() {
         try {
             const res = await fetch('/api/store-requests', {
                 method: 'PATCH',
-                headers: { 'Content-Type': 'application/json' },
+                headers: {
+                    'Content-Type': 'application/json',
+                    ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
+                },
                 body: JSON.stringify({
-                    actor: currentUser,
                     requestId,
                     status,
                 }),
