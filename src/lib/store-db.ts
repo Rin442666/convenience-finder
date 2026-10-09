@@ -26,6 +26,8 @@ export type StoreRecord = {
   openHours?: string;
   amenities: string[];
   distanceMeters?: number;
+  // Số lượt đánh giá (optional để không vỡ code cũ).
+  ratingCount?: number;
 };
 
 export type StoreFilters = {
@@ -336,6 +338,98 @@ export function addStoreToSeed(store: StoreRecord): void {
   }
 }
 
+// --- Đánh giá sao ---
+// Mỗi cửa hàng có tổng điểm và số lượt đánh giá (lưu in-memory, giống
+// users và store requests). Seed khởi tạo với SEED_RATING_VOTES lượt "đệm"
+// để 1-2 đánh giá mới không làm trung bình nhảy loạn; cửa hàng chưa có
+// rating (0) thì bắt đầu từ 0 lượt.
+const SEED_RATING_VOTES = 20;
+
+type RatingAggregate = { total: number; count: number };
+const ratingAggregates = new Map<string, RatingAggregate>();
+// storeId -> (userId -> stars): mỗi user 1 đánh giá/cửa hàng, chấm lại thì cập nhật.
+const userRatings = new Map<string, Map<string, number>>();
+
+function round1(value: number): number {
+  return Math.round(value * 10) / 10;
+}
+
+function ensureRatingAggregate(storeId: string, baseRating: number): RatingAggregate {
+  const existing = ratingAggregates.get(storeId);
+  if (existing) {
+    return existing;
+  }
+  const count = baseRating > 0 ? SEED_RATING_VOTES : 0;
+  const aggregate: RatingAggregate = { total: round1(baseRating) * count, count };
+  ratingAggregates.set(storeId, aggregate);
+  return aggregate;
+}
+
+// Rating "trực tiếp" để ghi đè lên rating tĩnh của seed/DB khi query.
+export function getLiveRating(storeId: string, baseRating: number): { rating: number; ratingCount: number } {
+  const aggregate = ensureRatingAggregate(storeId, baseRating);
+  if (aggregate.count === 0) {
+    return { rating: 0, ratingCount: 0 };
+  }
+  return { rating: round1(aggregate.total / aggregate.count), ratingCount: aggregate.count };
+}
+
+export function getUserRating(storeId: string, userId: string): number | null {
+  return userRatings.get(storeId)?.get(userId) ?? null;
+}
+
+export function submitStoreRating(
+  storeId: string,
+  userId: string,
+  stars: number,
+  baseRating: number
+): { rating: number; ratingCount: number } | null {
+  if (!Number.isInteger(stars) || stars < 1 || stars > 5) {
+    return null;
+  }
+  const aggregate = ensureRatingAggregate(storeId, baseRating);
+  let perUser = userRatings.get(storeId);
+  if (!perUser) {
+    perUser = new Map<string, number>();
+    userRatings.set(storeId, perUser);
+  }
+  const previous = perUser.get(userId);
+  if (previous === undefined) {
+    aggregate.total += stars;
+    aggregate.count += 1;
+  } else {
+    // Chấm lại: chỉ điều chỉnh phần chênh lệch, không tăng lượt.
+    aggregate.total += stars - previous;
+  }
+  perUser.set(userId, stars);
+  return { rating: round1(aggregate.total / aggregate.count), ratingCount: aggregate.count };
+}
+
+// Rating gốc của cửa hàng (seed hoặc DB). Trả null nếu không tồn tại.
+export async function getStoreBaseRating(storeId: string): Promise<number | null> {
+  const seedStore = initialStoreSeed.find((store) => store.id === storeId);
+  if (seedStore) {
+    return seedStore.rating;
+  }
+  const pool = await getSqlPool();
+  if (!pool) {
+    return null;
+  }
+  try {
+    const request = pool.request();
+    if (/^\d+$/.test(storeId)) {
+      request.input('id', sql.Int, Number(storeId));
+    } else {
+      request.input('id', sql.NVarChar(100), storeId);
+    }
+    const result = await request.query('SELECT CAST(Rating AS float) AS rating FROM dbo.Stores WHERE Id = @id');
+    const row = result.recordset[0];
+    return row ? Number(row.rating) || 0 : null;
+  } catch {
+    return null;
+  }
+}
+
 // Tính trạng thái mở/đóng theo giờ hiện tại từ chuỗi openHours ("06:00-23:00").
 // Xử lý cả khung giờ qua đêm ("22:00-06:00"). Nếu không parse được giờ thì
 // giữ nguyên giá trị isOpen có sẵn (dữ liệu DB hoặc Google Places).
@@ -427,7 +521,7 @@ function getSqlConfig() {
   return config;
 }
 
-async function getSqlPool() {
+export async function getSqlPool() {
   if (sharedSqlPool && sharedSqlPool.connected) {
     return sharedSqlPool;
   }
@@ -548,12 +642,18 @@ export async function queryStoresFromDatabase(filters: StoreFilters): Promise<St
     const normalizedSearch = (filters.search || '').trim().toLowerCase();
 
     return mapped
-      .map((store: StoreRecord) => ({
-        ...store,
-        // Ưu tiên giờ mở cửa thực tế thay vì cột IsOpen có thể đã cũ trong DB.
-        isOpen: computeIsOpenNow(store),
-        distanceMeters: haversineDistanceMeters(filters.lat, filters.lng, store.lat, store.lng),
-      }))
+      .map((store: StoreRecord) => {
+        // Ghi đè rating tĩnh bằng rating trực tiếp (đã gồm đánh giá của user).
+        const live = getLiveRating(store.id, store.rating);
+        return {
+          ...store,
+          rating: live.rating,
+          ratingCount: live.ratingCount,
+          // Ưu tiên giờ mở cửa thực tế thay vì cột IsOpen có thể đã cũ trong DB.
+          isOpen: computeIsOpenNow(store),
+          distanceMeters: haversineDistanceMeters(filters.lat, filters.lng, store.lat, store.lng),
+        };
+      })
       .filter((store: StoreRecord & { distanceMeters: number }) => {
         const withinRadius = store.distanceMeters <= (filters.radius || 1000);
         const selectedBrands = filters.brandIds || [];
@@ -590,12 +690,18 @@ export function queryStores(filters: StoreFilters): StoreRecord[] {
   const normalizedSearch = search.trim().toLowerCase();
 
   return initialStoreSeed
-    .map((store) => ({
-      ...store,
-      // Ghi đè trạng thái mở/đóng theo giờ hiện tại thay vì dùng giá trị cứng trong seed.
-      isOpen: computeIsOpenNow(store),
-      distanceMeters: haversineDistanceMeters(lat, lng, store.lat, store.lng),
-    }))
+    .map((store) => {
+      // Ghi đè rating tĩnh trong seed bằng rating trực tiếp (đã gồm đánh giá của user).
+      const live = getLiveRating(store.id, store.rating);
+      return {
+        ...store,
+        rating: live.rating,
+        ratingCount: live.ratingCount,
+        // Ghi đè trạng thái mở/đóng theo giờ hiện tại thay vì dùng giá trị cứng trong seed.
+        isOpen: computeIsOpenNow(store),
+        distanceMeters: haversineDistanceMeters(lat, lng, store.lat, store.lng),
+      };
+    })
     .filter((store) => {
       const withinRadius = store.distanceMeters <= radius;
       const matchesBrand = brandIds.length === 0 || brandIds.includes(store.brandId);

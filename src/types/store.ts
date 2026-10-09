@@ -16,6 +16,7 @@ export interface Store {
     lat: number;
     lng: number;
     rating?: number;
+    ratingCount?: number;
     isOpen?: boolean;
     is24h?: boolean;
     amenities?: string[];
