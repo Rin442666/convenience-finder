@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createStoreRequest, listPendingStoreRequests, updateStoreRequestStatus } from '@/lib/auth-system';
+import { ensurePersistenceLoaded, saveApprovedStores, saveStoreRequests } from '@/lib/server-persist';
 import { findServerUserById, getSessionFromRequest, sessionHasPermission } from '@/lib/server-auth';
 import { addStoreToSeed, brands, type StoreRecord } from '@/lib/store-db';
 
@@ -11,6 +12,9 @@ export async function GET(req: Request) {
   if (!sessionHasPermission(session, 'approve_store_request')) {
     return NextResponse.json({ requests: [] }, { status: 401 });
   }
+
+  // Nạp dữ liệu đã lưu từ đĩa (nếu có) trước khi liệt kê.
+  ensurePersistenceLoaded();
 
   return NextResponse.json({ requests: listPendingStoreRequests() });
 }
@@ -41,6 +45,10 @@ export async function POST(req: Request) {
       amenities: Array.isArray(body.amenities) ? body.amenities.map(String) : [],
       notes: String(body.notes || '').trim(),
     });
+
+    // Lưu ra file để restart server không mất yêu cầu.
+    ensurePersistenceLoaded();
+    saveStoreRequests();
 
     return NextResponse.json({
       request: createdRequest,
@@ -84,6 +92,10 @@ export async function PATCH(req: Request) {
       );
     }
 
+    // Lưu trạng thái mới ra file để restart server không bị quay về PENDING.
+    ensurePersistenceLoaded();
+    saveStoreRequests();
+
     // Khi admin duyệt: đưa cửa hàng mới vào danh sách để hiện ngay trên
     // bản đồ/danh sách. Bỏ qua nếu tọa độ không hợp lệ.
     if (updated.status === 'APPROVED' && Number.isFinite(updated.lat) && Number.isFinite(updated.lng) && updated.lat !== 0 && updated.lng !== 0) {
@@ -104,6 +116,8 @@ export async function PATCH(req: Request) {
         amenities: updated.amenities.filter((amenityId) => validAmenityIds.includes(amenityId)),
       };
       addStoreToSeed(newStore);
+      // Lưu cửa hàng đã duyệt ra file để restart server không bị mất.
+      saveApprovedStores();
     }
 
     return NextResponse.json({ request: updated });

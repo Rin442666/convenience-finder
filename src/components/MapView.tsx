@@ -8,6 +8,10 @@ interface MapViewProps {
   stores: Store[];
   selectedStore?: Store | null;
   onMapMoveEnd?: (newCenter: UserLocation) => void;
+  // Chế độ "chọn vị trí trên bản đồ": khi bật, click vào bản đồ sẽ gọi
+  // onMapClick thay vì chỉ kéo thả xem bản đồ.
+  pickingEnabled?: boolean;
+  onMapClick?: (location: UserLocation) => void;
 }
 
 // Escape HTML để chống XSS khi tên/địa chỉ cửa hàng chứa ký tự đặc biệt
@@ -21,7 +25,7 @@ function escapeHtml(value: string): string {
     .replace(/'/g, '&#39;');
 }
 
-export default function MapView({ center, stores, selectedStore, onMapMoveEnd }: MapViewProps) {
+export default function MapView({ center, stores, selectedStore, onMapMoveEnd, pickingEnabled, onMapClick }: MapViewProps) {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<any>(null);
   const routeLayerRef = useRef<any>(null);
@@ -31,6 +35,15 @@ export default function MapView({ center, stores, selectedStore, onMapMoveEnd }:
   const prevSelectedIdRef = useRef<string | null>(null);
   // Đánh số request vẽ đường đi để response cũ không ghi đè (race condition).
   const routeRequestIdRef = useRef<number>(0);
+  // Ref cho callback chọn vị trí: bản đồ chỉ tạo 1 lần nên dùng ref để luôn
+  // gọi callback mới nhất mà không cần khởi tạo lại map. Gán trong effect
+  // (không gán trực tiếp lúc render) để đúng quy tắc react-hooks/refs.
+  const pickingEnabledRef = useRef(pickingEnabled);
+  const onMapClickRef = useRef(onMapClick);
+  useEffect(() => {
+    pickingEnabledRef.current = pickingEnabled;
+    onMapClickRef.current = onMapClick;
+  });
 
   useEffect(() => {
     if (!document.getElementById('leaflet-css')) {
@@ -45,10 +58,12 @@ export default function MapView({ center, stores, selectedStore, onMapMoveEnd }:
       if (!window.L || !mapContainerRef.current) return;
 
       if (!mapInstanceRef.current) {
-        const map = window.L.map(mapContainerRef.current).setView([center.lat, center.lng], 14);
+        // Tắt attribution control trên bản đồ vì credit OpenStreetMap đã có
+        // ở footer cuối trang.
+        const map = window.L.map(mapContainerRef.current, { attributionControl: false }).setView([center.lat, center.lng], 14);
 
         window.L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-          attribution: '&copy; OpenStreetMap contributors',
+          attribution: '',
         }).addTo(map);
 
         map.on('moveend', () => {
@@ -58,10 +73,22 @@ export default function MapView({ center, stores, selectedStore, onMapMoveEnd }:
           }
         });
 
+        // Click bản đồ để chọn vị trí tìm kiếm (chỉ khi đang bật chế độ chọn).
+        map.on('click', (event: { latlng: { lat: number; lng: number } }) => {
+          if (pickingEnabledRef.current && onMapClickRef.current) {
+            onMapClickRef.current({ lat: event.latlng.lat, lng: event.latlng.lng });
+          }
+        });
+
         mapInstanceRef.current = map;
       }
 
       const map = mapInstanceRef.current;
+
+      // Đổi con trỏ chuột khi đang ở chế độ chọn vị trí.
+      if (mapContainerRef.current) {
+        mapContainerRef.current.style.cursor = pickingEnabledRef.current ? 'crosshair' : '';
+      }
 
       // Chỉ reset góc nhìn khi vị trí trung tâm thật sự đổi (GPS mới),
       // không reset khi người dùng chỉ đổi filter/tìm kiếm.

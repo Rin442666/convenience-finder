@@ -43,3 +43,6 @@ next-env.d.ts
 .env
 .env.local
 .env.*.local
+
+# Du lieu runtime (store requests, cua hang da duyet) - khong commit
+data/

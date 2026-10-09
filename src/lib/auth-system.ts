@@ -83,6 +83,21 @@ export function listPendingStoreRequests(): StoreRequestRecord[] {
   return storeRequests.filter((request) => request.status === 'PENDING');
 }
 
+// Truy xuất toàn bộ requests (kể cả đã xử lý) để persistence layer lưu ra file.
+// Tách riêng khỏi listPendingStoreRequests để không lộ logic lọc.
+export function getAllStoreRequests(): StoreRequestRecord[] {
+  return storeRequests;
+}
+
+// Khôi phục requests từ file khi server khởi động (thay cho seed cứng).
+// Không dùng node:fs ở đây để file này vẫn import được từ client component.
+export function restoreStoreRequests(records: StoreRequestRecord[]): void {
+  storeRequests.length = 0;
+  for (const record of records) {
+    storeRequests.push(record);
+  }
+}
+
 export function createStoreRequest(payload: {
   submittedBy: string;
   submittedByName: string;

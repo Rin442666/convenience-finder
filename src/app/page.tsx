@@ -1,7 +1,7 @@
-﻿'use client';
+'use client';
 
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { MapPin, Star, Navigation, User, X, SearchX, ChartColumn } from 'lucide-react';
+import { MapPin, Star, Navigation, User, X, SearchX, Heart, Clock, Crosshair } from 'lucide-react';
 import MapView from '@/components/MapView';
 import ToastHost, { toast } from '@/components/Toast';
 import { AppUser, StoreRequestRecord, getRoleLabel, hasPermission } from '@/lib/auth-system';
@@ -50,6 +50,7 @@ function formatRadius(meters: number): string {
 }
 
 const STORAGE_SESSION_KEY = 'finder_session';
+const STORAGE_FAVORITES_KEY = 'finder_favorites';
 
 type AuthMode = 'login' | 'register';
 type MainView = 'main' | 'profile' | 'store-request';
@@ -104,6 +105,45 @@ function clearLegacyAuthData() {
     window.localStorage.removeItem('finder_current_user');
 }
 
+// Danh sách yêu thích lưu theo từng user trong localStorage:
+// { [userId]: [storeId, ...] }. Reset server không mất vì nằm ở client.
+function loadFavorites(userId: string): string[] {
+    if (typeof window === 'undefined') {
+        return [];
+    }
+    try {
+        const saved = window.localStorage.getItem(STORAGE_FAVORITES_KEY);
+        if (!saved) {
+            return [];
+        }
+        const parsed = JSON.parse(saved) as Record<string, unknown>;
+        const ids = parsed[userId];
+        return Array.isArray(ids) ? ids.filter((id): id is string => typeof id === 'string') : [];
+    } catch {
+        return [];
+    }
+}
+
+function persistFavorites(userId: string, storeIds: string[]) {
+    if (typeof window === 'undefined') {
+        return;
+    }
+    try {
+        const saved = window.localStorage.getItem(STORAGE_FAVORITES_KEY);
+        const parsed = (saved ? JSON.parse(saved) : {}) as Record<string, string[]>;
+        parsed[userId] = storeIds;
+        window.localStorage.setItem(STORAGE_FAVORITES_KEY, JSON.stringify(parsed));
+    } catch {
+        // localStorage đầy hoặc bị chặn thì bỏ qua, không crash app.
+    }
+}
+
+// Tên thương hiệu để hiển thị trong modal chi tiết.
+function getBrandName(brandId?: string): string {
+    const brand = brandOptions.find((option) => option.id === brandId);
+    return brand ? brand.name : 'Cửa hàng tiện lợi';
+}
+
 export default function Home() {
     const [userLocation, setUserLocation] = useState<UserLocation>({
         lat: 21.03477,
@@ -137,6 +177,24 @@ export default function Home() {
     const [selectedBrand, setSelectedBrand] = useState<string>('all');
     const [selectedAmenities, setSelectedAmenities] = useState<string[]>([]);
     const [openOnly, setOpenOnly] = useState<boolean>(false);
+    // Sắp xếp + lọc theo đánh giá (gửi lên API để cả 3 nguồn dữ liệu xử lý giống nhau).
+    const [sortBy, setSortBy] = useState<'nearest' | 'rating'>('nearest');
+    const [minRating, setMinRating] = useState<number>(0);
+    // Chế độ "chọn vị trí trên bản đồ": bật nút rồi click vào bản đồ để tìm
+    // cửa hàng quanh điểm đã chọn thay vì vị trí GPS.
+    const [pickingLocation, setPickingLocation] = useState<boolean>(false);
+    const [pickedLocation, setPickedLocation] = useState<boolean>(false);
+    // Cửa hàng đang mở modal chi tiết.
+    const [detailsStore, setDetailsStore] = useState<Store | null>(null);
+    // Danh sách yêu thích của user đang đăng nhập. Khởi tạo lười từ
+    // localStorage theo session đã lưu; đổi user (login/logout/register)
+    // thì cập nhật ngay trong handler, không dùng effect để tránh
+    // set-state-in-effect.
+    const [favoriteIds, setFavoriteIds] = useState<string[]>(() => {
+        const saved = loadSession();
+        return saved ? loadFavorites(saved.user.id) : [];
+    });
+    const [favoritesOnly, setFavoritesOnly] = useState<boolean>(false);
     const [currentUser, setCurrentUser] = useState<Omit<AppUser, 'password'> | null>(null);
     const [authToken, setAuthToken] = useState<string | null>(null);
     const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
@@ -174,6 +232,9 @@ export default function Home() {
             setLocationStatus('denied');
             return;
         }
+        // Quay về vị trí GPS thật: bỏ điểm đã chọn tay trên bản đồ.
+        setPickedLocation(false);
+        setPickingLocation(false);
         // Không set 'locating' đồng bộ ở đây để tránh setState trong effect;
         // trạng thái đã khởi tạo là 'locating', nút bấm lại cũng không cần.
         navigator.geolocation.getCurrentPosition(
@@ -242,6 +303,8 @@ export default function Home() {
                     lng: String(userLocation.lng),
                     radius: String(radius),
                     openOnly: String(openOnly),
+                    sort: sortBy,
+                    minRating: String(minRating),
                 });
 
                 if (selectedBrand !== 'all') {
@@ -281,7 +344,7 @@ export default function Home() {
         }
 
         fetchStores();
-    }, [userLocation, radius, selectedBrand, selectedAmenities, openOnly, debouncedSearchTerm, storesRetryKey]);
+    }, [userLocation, radius, selectedBrand, selectedAmenities, openOnly, debouncedSearchTerm, sortBy, minRating, storesRetryKey]);
 
     const toggleAmenity = (amenityId: string) => {
         setSelectedAmenities((current) =>
@@ -289,6 +352,43 @@ export default function Home() {
                 ? current.filter((id) => id !== amenityId)
                 : [...current, amenityId]
         );
+    };
+
+    // Thêm/bỏ cửa hàng khỏi danh sách yêu thích của user đang đăng nhập.
+    const toggleFavorite = (store: Store) => {
+        if (!currentUser) {
+            toast('Đăng nhập để lưu cửa hàng yêu thích.', 'info');
+            setIsAuthModalOpen(true);
+            return;
+        }
+
+        // Tính danh sách mới trước rồi mới setState + toast. Không được gọi
+        // toast() (setState của ToastHost) bên trong updater của setFavoriteIds
+        // vì updater có thể chạy trong lúc render -> React báo lỗi
+        // "Cannot update a component while rendering a different component".
+        const isFavorite = favoriteIds.includes(store.id);
+        const next = isFavorite
+            ? favoriteIds.filter((id) => id !== store.id)
+            : [...favoriteIds, store.id];
+        setFavoriteIds(next);
+        persistFavorites(currentUser.id, next);
+        toast(isFavorite ? 'Đã bỏ khỏi danh sách yêu thích.' : 'Đã lưu vào danh sách yêu thích.', 'success');
+    };
+
+    // Người dùng click vào bản đồ khi đang ở chế độ chọn vị trí: lấy điểm đó
+    // làm vị trí tìm kiếm mới (tự refetch nhờ userLocation đổi).
+    const handleMapClick = (location: UserLocation) => {
+        setUserLocation(location);
+        setPickedLocation(true);
+        setPickingLocation(false);
+        setSelectedStore(null);
+        toast('Đã chọn vị trí mới trên bản đồ.', 'success');
+    };
+
+    // Mở modal chi tiết cửa hàng (đồng thời chọn trên bản đồ để xem vị trí).
+    const openStoreDetails = (store: Store) => {
+        setSelectedStore(store);
+        setDetailsStore(store);
     };
 
     const handleLogin = async () => {
@@ -311,6 +411,8 @@ export default function Home() {
             setCurrentUser(data.user);
             setAuthToken(data.token);
             persistSession({ token: data.token, user: data.user });
+            setFavoriteIds(loadFavorites(data.user.id));
+            setFavoritesOnly(false);
             setIsAuthModalOpen(false);
             setAccountMenuOpen(false);
             setAuthMode('login');
@@ -357,6 +459,8 @@ export default function Home() {
             setCurrentUser(data.user);
             setAuthToken(data.token);
             persistSession({ token: data.token, user: data.user });
+            setFavoriteIds(loadFavorites(data.user.id));
+            setFavoritesOnly(false);
             setIsAuthModalOpen(false);
             setAuthMode('login');
             setLoginForm({ email: '', password: '' });
@@ -372,6 +476,8 @@ export default function Home() {
         setCurrentUser(null);
         setAuthToken(null);
         persistSession(null);
+        setFavoriteIds([]);
+        setFavoritesOnly(false);
         setAccountMenuOpen(false);
         setMainView('main');
     };
@@ -527,19 +633,26 @@ export default function Home() {
         }
     };
 
-    const handleDirections = (e: React.MouseEvent, store: Store) => {
-        e.stopPropagation();
+    // Mở Google Maps chỉ đường. Dùng chung cho card và modal chi tiết.
+    const openDirections = (store: Store) => {
         setSelectedStore(store);
 
         const googleMapsUrl = `https://www.google.com/maps/dir/?api=1&origin=${userLocation.lat},${userLocation.lng}&destination=${store.lat},${store.lng}`;
         window.open(googleMapsUrl, '_blank');
     };
 
+    const handleDirections = (e: React.MouseEvent, store: Store) => {
+        e.stopPropagation();
+        openDirections(store);
+    };
+
     // Số liệu cho thẻ "Tổng quan" dưới bộ lọc — tính trực tiếp từ kết quả
     // đang hiển thị nên tự cập nhật khi đổi filter/tìm kiếm.
-    // Danh sách đã được sắp xếp theo khoảng cách tăng dần từ API.
+    // Khi sắp xếp theo đánh giá, cửa hàng đầu danh sách là đánh giá cao nhất.
     const openStoreCount = stores.filter((store) => store.isOpen || store.is24h).length;
-    const nearestStore = stores.length > 0 ? stores[0] : undefined;
+    const nearestStore = sortBy === 'nearest' && stores.length > 0 ? stores[0] : undefined;
+    // Tab "Yêu thích": lọc client-side theo danh sách đã lưu của user.
+    const displayedStores = favoritesOnly ? stores.filter((store) => favoriteIds.includes(store.id)) : stores;
 
     return (
         <main className="min-h-screen bg-gray-50 p-6">
@@ -756,11 +869,11 @@ export default function Home() {
                 </div>
             )}
 
-            <div className="max-w-7xl mx-auto grid grid-cols-1 xl:grid-cols-[320px_minmax(0,1fr)] gap-6">
-                <aside className="h-fit space-y-4">
-                    <div className="bg-white rounded-2xl shadow-md p-4 space-y-5">
+            {/* Thanh bộ lọc ngang gọn (thay sidebar dài) + dải thống kê luôn nhìn thấy */}
+            <div className="max-w-7xl mx-auto mb-6 rounded-2xl bg-white px-4 py-3.5 shadow-md">
+                <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-[minmax(0,1fr)_130px_160px_180px_160px]">
                     <div>
-                        <label className="block text-sm font-semibold text-gray-800 mb-2">Tìm kiếm</label>
+                        <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-gray-500">Tìm kiếm</label>
                         <input
                             value={searchTerm}
                             onChange={(e) => handleSearchChange(e.target.value)}
@@ -770,7 +883,7 @@ export default function Home() {
                     </div>
 
                     <div>
-                        <label className="block text-sm font-semibold text-gray-800 mb-2">Bán kính</label>
+                        <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-gray-500">Bán kính</label>
                         <select
                             value={radius}
                             onChange={(e) => setRadius(Number(e.target.value))}
@@ -785,7 +898,7 @@ export default function Home() {
                     </div>
 
                     <div>
-                        <label className="block text-sm font-semibold text-gray-800 mb-2">Thương hiệu</label>
+                        <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-gray-500">Thương hiệu</label>
                         <select
                             value={selectedBrand}
                             onChange={(e) => setSelectedBrand(e.target.value)}
@@ -800,101 +913,179 @@ export default function Home() {
                     </div>
 
                     <div>
-                        <label className="block text-sm font-semibold text-gray-800 mb-2">Tiện ích</label>
-                        <div className="space-y-2">
-                            {amenityOptions.map((amenity) => {
-                                const checked = selectedAmenities.includes(amenity.id);
-                                return (
-                                    <label key={amenity.id} className="flex items-center gap-2 text-sm text-gray-700">
-                                        <input
-                                            type="checkbox"
-                                            checked={checked}
-                                            onChange={() => toggleAmenity(amenity.id)}
-                                            className="rounded border-gray-300 text-blue-600 shadow-sm focus:ring-blue-500"
-                                        />
-                                        {amenity.name}
-                                    </label>
-                                );
-                            })}
-                        </div>
+                        <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-gray-500">Sắp xếp</label>
+                        <select
+                            value={sortBy}
+                            onChange={(e) => setSortBy(e.target.value as 'nearest' | 'rating')}
+                            className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white text-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                        >
+                            <option value="nearest">Gần nhất trước</option>
+                            <option value="rating">Đánh giá cao nhất</option>
+                        </select>
                     </div>
 
-                    <label className="flex items-center gap-2 text-sm text-gray-700">
-                        <input
-                            type="checkbox"
-                            checked={openOnly}
-                            onChange={(e) => setOpenOnly(e.target.checked)}
-                            className="rounded border-gray-300 text-blue-600 shadow-sm focus:ring-blue-500"
-                        />
-                        Chỉ hiển thị đang mở
-                    </label>
+                    <div>
+                        <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-gray-500">Đánh giá tối thiểu</label>
+                        <select
+                            value={minRating}
+                            onChange={(e) => setMinRating(Number(e.target.value))}
+                            className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white text-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                        >
+                            <option value={0}>Mọi mức</option>
+                            <option value={3}>Từ 3.0 sao</option>
+                            <option value={4}>Từ 4.0 sao</option>
+                            <option value={4.5}>Từ 4.5 sao</option>
+                        </select>
                     </div>
+                </div>
 
-                    {!isLoadingStores && (
-                        <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-md">
-                            <h3 className="flex items-center gap-1.5 text-sm font-semibold text-gray-800">
-                                <ChartColumn className="h-4 w-4 text-blue-600" />
-                                Tổng quan
-                            </h3>
-                            <dl className="mt-2.5 space-y-1.5 text-sm text-gray-600">
-                                <div className="flex items-center justify-between gap-2">
-                                    <dt>Trong bán kính {formatRadius(radius)}</dt>
-                                    <dd className="font-semibold text-gray-900">{stores.length} cửa hàng</dd>
-                                </div>
-                                <div className="flex items-center justify-between gap-2">
-                                    <dt>Đang mở cửa</dt>
-                                    <dd className="font-semibold text-emerald-600">{openStoreCount}</dd>
-                                </div>
-                                {nearestStore && (
-                                    <div className="flex items-center justify-between gap-2">
-                                        <dt className="shrink-0">Gần nhất</dt>
-                                        <dd className="truncate font-medium text-gray-900" title={nearestStore.name}>
-                                            {nearestStore.name} • {formatDistanceValue(nearestStore.distanceMeters)}
-                                        </dd>
-                                    </div>
-                                )}
-                                <div className="flex items-center justify-between gap-2 border-t border-gray-100 pt-2">
-                                    <dt className="flex shrink-0 items-center gap-1.5">
-                                        <span
-                                            className={`h-2 w-2 rounded-full ${locationStatus === 'gps'
-                                                    ? 'bg-emerald-500'
-                                                    : locationStatus === 'denied'
-                                                        ? 'bg-amber-500'
-                                                        : 'animate-pulse bg-blue-500'
-                                                }`}
-                                        />
-                                        {locationStatus === 'gps'
-                                            ? 'Vị trí GPS của bạn'
+                <div className="mt-3 flex flex-wrap items-center gap-2">
+                    {amenityOptions.map((amenity) => {
+                        const active = selectedAmenities.includes(amenity.id);
+                        return (
+                            <button
+                                key={amenity.id}
+                                type="button"
+                                onClick={() => toggleAmenity(amenity.id)}
+                                className={`rounded-full px-3 py-1.5 text-xs font-medium transition ${active
+                                        ? 'bg-blue-600 text-white shadow-sm'
+                                        : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                                    }`}
+                            >
+                                {amenity.name}
+                            </button>
+                        );
+                    })}
+                    <button
+                        type="button"
+                        onClick={() => setOpenOnly((prev) => !prev)}
+                        className={`rounded-full px-3 py-1.5 text-xs font-medium transition ${openOnly
+                                ? 'bg-emerald-600 text-white shadow-sm'
+                                : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                            }`}
+                    >
+                        Chỉ đang mở
+                    </button>
+                </div>
+
+                {!isLoadingStores && (
+                    <div className="mt-4 flex flex-wrap items-center gap-x-5 gap-y-1.5 border-t border-gray-100 pt-3 text-sm text-gray-600">
+                        <span>
+                            <span className="font-bold text-gray-900">{stores.length}</span> cửa hàng trong {formatRadius(radius)}
+                        </span>
+                        <span>
+                            <span className="font-bold text-emerald-600">{openStoreCount}</span> đang mở
+                        </span>
+                        {nearestStore && (
+                            <span className="min-w-0 truncate">
+                                Gần nhất: <span className="font-semibold text-gray-900">{nearestStore.name}</span>
+                                {' '}• {formatDistanceValue(nearestStore.distanceMeters)}
+                            </span>
+                        )}
+                        <span className="ml-auto flex items-center gap-1.5 text-xs">
+                            <span
+                                className={`h-2 w-2 rounded-full ${locationStatus === 'gps' && !pickedLocation
+                                        ? 'bg-emerald-500'
+                                        : pickedLocation
+                                            ? 'bg-violet-500'
                                             : locationStatus === 'denied'
-                                                ? 'Không lấy được vị trí'
-                                                : 'Đang xác định vị trí...'}
-                                    </dt>
-                                    {locationStatus === 'denied' && (
-                                        <dd>
-                                            <button
-                                                type="button"
-                                                onClick={requestLocation}
-                                                className="text-xs font-semibold text-blue-600 hover:text-blue-800"
-                                            >
-                                                Dùng vị trí của tôi
-                                            </button>
-                                        </dd>
-                                    )}
-                                </div>
-                            </dl>
-                        </div>
-                    )}
-                </aside>
+                                                ? 'bg-amber-500'
+                                                : 'animate-pulse bg-blue-500'
+                                    }`}
+                            />
+                            {pickedLocation
+                                ? 'Vị trí đã chọn trên bản đồ'
+                                : locationStatus === 'gps'
+                                    ? 'Vị trí GPS của bạn'
+                                    : locationStatus === 'denied'
+                                        ? 'Không lấy được vị trí'
+                                        : 'Đang xác định vị trí...'}
+                            {(locationStatus === 'denied' || pickedLocation) && (
+                                <button
+                                    type="button"
+                                    onClick={requestLocation}
+                                    className="font-semibold text-blue-600 hover:text-blue-800"
+                                >
+                                    Dùng vị trí của tôi
+                                </button>
+                            )}
+                        </span>
+                    </div>
+                )}
+            </div>
 
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                    <div className="bg-white rounded-2xl shadow-md p-2 h-[550px]">
-                        <MapView center={userLocation} stores={stores} selectedStore={selectedStore} />
+            <div className="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_340px] gap-6">
+
+                <div className="relative bg-white rounded-2xl shadow-md p-2 h-[600px]">
+                        {/* Cụm nút đặt ở góc phải để không che nút zoom +/- (góc trái) của bản đồ.
+                            z-10: đủ nổi trên các lớp của Leaflet, nhưng thấp hơn modal (z-40)
+                            để không đè lên modal chi tiết khi mở. */}
+                        <div className="absolute right-4 top-4 z-10 flex gap-2">
+                            <button
+                                type="button"
+                                onClick={() => setPickingLocation((prev) => !prev)}
+                                className={`flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold shadow-md transition ${pickingLocation
+                                        ? 'bg-blue-600 text-white hover:bg-blue-700'
+                                        : 'bg-white text-gray-700 hover:bg-gray-50'
+                                    }`}
+                            >
+                                <Crosshair className="h-4 w-4" />
+                                {pickingLocation ? 'Đang chọn vị trí...' : 'Chọn vị trí trên bản đồ'}
+                            </button>
+                            {pickedLocation && (
+                                <button
+                                    type="button"
+                                    onClick={requestLocation}
+                                    className="rounded-lg bg-white px-3 py-2 text-xs font-semibold text-blue-600 shadow-md hover:bg-blue-50"
+                                >
+                                    Về vị trí của tôi
+                                </button>
+                            )}
+                        </div>
+                        {pickingLocation && (
+                            <div className="absolute left-1/2 top-4 z-10 -translate-x-1/2 rounded-full bg-slate-900/85 px-4 py-1.5 text-xs font-medium text-white shadow-md">
+                                Nhấn vào bản đồ để chọn vị trí tìm kiếm
+                            </div>
+                        )}
+                        <MapView
+                            center={userLocation}
+                            stores={stores}
+                            selectedStore={selectedStore}
+                            pickingEnabled={pickingLocation}
+                            onMapClick={handleMapClick}
+                        />
                     </div>
 
-                    <div className="bg-white rounded-2xl shadow-md p-4 h-[550px] overflow-y-auto">
-                        <h2 className="font-bold text-lg mb-4 text-gray-800">
-                            Danh sách cửa hàng ({stores.length})
-                        </h2>
+                    <div className="bg-white rounded-2xl shadow-md h-[600px] flex flex-col overflow-hidden">
+                        <div className="shrink-0 p-4 pb-3">
+                            <h2 className="font-bold text-base text-gray-800">
+                                Danh sách cửa hàng ({displayedStores.length})
+                            </h2>
+                            {currentUser && (
+                                <div className="mt-2.5 flex rounded-lg bg-gray-100 p-0.5 text-xs font-medium">
+                                    <button
+                                        type="button"
+                                        onClick={() => setFavoritesOnly(false)}
+                                        className={`flex-1 whitespace-nowrap rounded-md px-2.5 py-1.5 transition ${!favoritesOnly
+                                                ? 'bg-white text-gray-900 shadow-sm'
+                                                : 'text-gray-500 hover:text-gray-700'
+                                            }`}
+                                    >
+                                        Tất cả
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => setFavoritesOnly(true)}
+                                        className={`flex flex-1 items-center justify-center gap-1 whitespace-nowrap rounded-md px-2.5 py-1.5 transition ${favoritesOnly
+                                                ? 'bg-white text-gray-900 shadow-sm'
+                                                : 'text-gray-500 hover:text-gray-700'
+                                            }`}
+                                    >
+                                        <Heart className={`h-3.5 w-3.5 shrink-0 ${favoritesOnly ? 'fill-red-500 text-red-500' : ''}`} />
+                                        Yêu thích
+                                    </button>
+                                </div>
+                            )}
 
                         {storesError && stores.length > 0 && (
                             <div className="mb-3 flex items-center justify-between gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
@@ -912,6 +1103,8 @@ export default function Home() {
                             </div>
                         )}
 
+                        </div>
+                        <div className="flex-1 overflow-y-auto px-4 pb-4">
                         {isLoadingStores ? (
                             <div className="space-y-3" aria-label="Đang tải danh sách cửa hàng">
                                 {[0, 1, 2].map((skeletonIndex) => (
@@ -925,22 +1118,35 @@ export default function Home() {
                                     </div>
                                 ))}
                             </div>
-                        ) : stores.length === 0 ? (
+                        ) : displayedStores.length === 0 ? (
                             <div className="flex h-[380px] flex-col items-center justify-center text-center">
-                                <SearchX className="h-10 w-10 text-gray-300" />
-                                <p className="mt-3 font-semibold text-gray-700">Không tìm thấy cửa hàng nào</p>
-                                <p className="mt-1 max-w-[240px] text-sm text-gray-500">
-                                    Thử nới rộng bán kính tìm kiếm hoặc bỏ bớt điều kiện lọc.
-                                </p>
+                                {favoritesOnly ? (
+                                    <>
+                                        <Heart className="h-10 w-10 text-gray-300" />
+                                        <p className="mt-3 font-semibold text-gray-700">Chưa có cửa hàng yêu thích</p>
+                                        <p className="mt-1 max-w-[240px] text-sm text-gray-500">
+                                            Nhấn biểu tượng trái tim trên cửa hàng để lưu lại những nơi bạn hay ghé.
+                                        </p>
+                                    </>
+                                ) : (
+                                    <>
+                                        <SearchX className="h-10 w-10 text-gray-300" />
+                                        <p className="mt-3 font-semibold text-gray-700">Không tìm thấy cửa hàng nào</p>
+                                        <p className="mt-1 max-w-[240px] text-sm text-gray-500">
+                                            Thử nới rộng bán kính tìm kiếm hoặc bỏ bớt điều kiện lọc.
+                                        </p>
+                                    </>
+                                )}
                             </div>
                         ) : (
                             <div className="space-y-3">
-                                {stores.map((store) => {
+                                {displayedStores.map((store) => {
                                 const isSelected = selectedStore?.id === store.id;
                                 const distanceLabel = formatDistance(store.distanceMeters);
                                 const storeAmenities = store.amenities || [];
                                 const visibleAmenities = storeAmenities.slice(0, 3);
                                 const hiddenAmenityCount = storeAmenities.length - visibleAmenities.length;
+                                const isFavorite = favoriteIds.includes(store.id);
                                 return (
                                     <div
                                         key={store.id}
@@ -961,7 +1167,25 @@ export default function Home() {
                                                     </p>
                                                 )}
                                             </div>
-                                            <div className="relative shrink-0">
+                                            <div className="flex shrink-0 items-start gap-1.5">
+                                                <button
+                                                    type="button"
+                                                    title={isFavorite ? 'Bỏ yêu thích' : 'Lưu yêu thích'}
+                                                    aria-label={isFavorite ? 'Bỏ yêu thích' : 'Lưu yêu thích'}
+                                                    onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        toggleFavorite(store);
+                                                    }}
+                                                    className="rounded-lg p-1.5 transition hover:bg-red-50"
+                                                >
+                                                    <Heart
+                                                        className={`h-4.5 w-4.5 ${isFavorite
+                                                                ? 'fill-red-500 text-red-500'
+                                                                : 'text-gray-300 hover:text-red-400'
+                                                            }`}
+                                                    />
+                                                </button>
+                                            <div className="relative">
                                                 <button
                                                     type="button"
                                                     title="Đánh giá cửa hàng"
@@ -1030,6 +1254,7 @@ export default function Home() {
                                                     </div>
                                                 )}
                                             </div>
+                                            </div>
                                         </div>
 
                                         {visibleAmenities.length > 0 && (
@@ -1050,7 +1275,7 @@ export default function Home() {
                                             </div>
                                         )}
 
-                                        <div className="mt-3 flex items-center justify-between gap-2 text-xs text-gray-600">
+                                        <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs text-gray-600">
                                             <span className="flex items-center gap-1.5">
                                                 <span
                                                     className={`h-2 w-2 rounded-full ${store.isOpen ? 'bg-emerald-500' : 'bg-gray-300'}`}
@@ -1058,22 +1283,148 @@ export default function Home() {
                                                 {store.isOpen ? 'Đang mở' : 'Đã đóng'}
                                                 {store.is24h ? ' • 24/7' : store.openHours ? ` • ${store.openHours}` : ''}
                                             </span>
-                                            <button
-                                                onClick={(e) => handleDirections(e, store)}
-                                                className="text-xs font-semibold text-blue-600 hover:text-blue-800 flex items-center gap-1 bg-blue-50 px-2.5 py-1.5 rounded-lg hover:bg-blue-100 transition"
-                                            >
-                                                <Navigation className="h-3.5 w-3.5" />
-                                                Chỉ đường
-                                            </button>
+                                            <div className="flex items-center gap-1.5">
+                                                <button
+                                                    onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        openStoreDetails(store);
+                                                    }}
+                                                    className="text-xs font-semibold text-gray-600 hover:text-gray-900 flex items-center gap-1 bg-gray-100 px-2.5 py-1.5 rounded-lg hover:bg-gray-200 transition"
+                                                >
+                                                    Chi tiết
+                                                </button>
+                                                <button
+                                                    onClick={(e) => handleDirections(e, store)}
+                                                    className="text-xs font-semibold text-blue-600 hover:text-blue-800 flex items-center gap-1 bg-blue-50 px-2.5 py-1.5 rounded-lg hover:bg-blue-100 transition"
+                                                >
+                                                    <Navigation className="h-3.5 w-3.5" />
+                                                    Chỉ đường
+                                                </button>
+                                            </div>
                                         </div>
                                     </div>
                                 );
                                 })}
                             </div>
                         )}
+                        </div>
+                    </div>
+            </div>
+
+            {detailsStore && (
+                <div
+                    className="fixed inset-0 z-40 flex items-center justify-center bg-slate-900/50 p-4"
+                    onClick={() => setDetailsStore(null)}
+                >
+                    <div
+                        onClick={(e) => e.stopPropagation()}
+                        className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-2xl border border-gray-200 bg-white p-6 shadow-2xl"
+                    >
+                        <div className="flex items-start justify-between gap-3">
+                            <div>
+                                <span className="inline-block rounded-full bg-blue-100 px-2.5 py-0.5 text-xs font-semibold text-blue-700">
+                                    {getBrandName(detailsStore.brandId)}
+                                </span>
+                                <h2 className="mt-2 text-xl font-bold text-gray-900">{detailsStore.name}</h2>
+                            </div>
+                            <button
+                                type="button"
+                                onClick={() => setDetailsStore(null)}
+                                aria-label="Đóng"
+                                className="rounded-lg p-1.5 text-gray-500 hover:bg-gray-100 hover:text-gray-700"
+                            >
+                                <X className="h-5 w-5" />
+                            </button>
+                        </div>
+
+                        <div className="mt-3 flex items-center gap-2 text-sm">
+                            <span className="flex items-center gap-1 font-semibold text-amber-500">
+                                <Star className="h-4 w-4 fill-amber-400 text-amber-400" />
+                                {(detailsStore.rating ?? 0) > 0 ? detailsStore.rating : '—'}
+                            </span>
+                            {(detailsStore.ratingCount ?? 0) > 0 && (
+                                <span className="text-gray-500">({detailsStore.ratingCount} lượt đánh giá)</span>
+                            )}
+                            <span
+                                className={`ml-auto flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold ${detailsStore.isOpen
+                                        ? 'bg-emerald-100 text-emerald-700'
+                                        : 'bg-gray-100 text-gray-600'
+                                    }`}
+                            >
+                                <span className={`h-2 w-2 rounded-full ${detailsStore.isOpen ? 'bg-emerald-500' : 'bg-gray-400'}`} />
+                                {detailsStore.isOpen ? 'Đang mở cửa' : 'Đã đóng cửa'}
+                            </span>
+                        </div>
+
+                        <div className="mt-4 space-y-2.5 text-sm text-gray-700">
+                            <p className="flex items-start gap-2">
+                                <MapPin className="mt-0.5 h-4 w-4 shrink-0 text-gray-400" />
+                                {detailsStore.address}
+                            </p>
+                            {formatDistance(detailsStore.distanceMeters) && (
+                                <p className="flex items-center gap-2 font-medium text-blue-600">
+                                    <Navigation className="h-4 w-4 shrink-0 text-gray-400" />
+                                    {formatDistance(detailsStore.distanceMeters)}
+                                </p>
+                            )}
+                            <p className="flex items-center gap-2">
+                                <Clock className="h-4 w-4 shrink-0 text-gray-400" />
+                                {detailsStore.is24h
+                                    ? 'Mở cửa 24/7'
+                                    : detailsStore.openHours
+                                        ? `Giờ mở cửa: ${detailsStore.openHours} (giờ Việt Nam)`
+                                        : 'Giờ mở cửa: đang cập nhật'}
+                            </p>
+                            <p className="text-xs text-gray-400">
+                                Tọa độ: {detailsStore.lat.toFixed(5)}, {detailsStore.lng.toFixed(5)}
+                            </p>
+                        </div>
+
+                        {(detailsStore.amenities?.length ?? 0) > 0 && (
+                            <div className="mt-4">
+                                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">Tiện ích</p>
+                                <div className="flex flex-wrap gap-1.5">
+                                    {detailsStore.amenities!.map((amenityId) => (
+                                        <span
+                                            key={amenityId}
+                                            className="rounded-full bg-blue-50 px-2.5 py-1 text-xs font-medium text-blue-700"
+                                        >
+                                            {amenityNameById[amenityId] || amenityId}
+                                        </span>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
+
+                        <div className="mt-6 flex gap-2">
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    openDirections(detailsStore);
+                                    setDetailsStore(null);
+                                }}
+                                className="flex flex-1 items-center justify-center gap-1.5 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-700"
+                            >
+                                <Navigation className="h-4 w-4" />
+                                Chỉ đường
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => toggleFavorite(detailsStore)}
+                                className={`flex flex-1 items-center justify-center gap-1.5 rounded-xl px-4 py-2.5 text-sm font-semibold transition ${favoriteIds.includes(detailsStore.id)
+                                        ? 'bg-red-50 text-red-600 hover:bg-red-100'
+                                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                                    }`}
+                            >
+                                <Heart
+                                    className={`h-4 w-4 ${favoriteIds.includes(detailsStore.id) ? 'fill-red-500 text-red-500' : ''}`}
+                                />
+                                {favoriteIds.includes(detailsStore.id) ? 'Đã yêu thích' : 'Yêu thích'}
+                            </button>
+                        </div>
                     </div>
                 </div>
-            </div>
+            )}
 
             {isAuthModalOpen && (
                 <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-900/50 p-4">

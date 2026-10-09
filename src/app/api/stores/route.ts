@@ -1,5 +1,6 @@
 ﻿import { NextResponse } from 'next/server';
 import {
+  applyRatingFilterAndSort,
   getStoreCatalog,
   getStoreCatalogFromDatabase,
   haversineDistanceMeters,
@@ -78,6 +79,10 @@ export async function GET(request: Request) {
     const amenityIds = parseArrayParam(searchParams.get('amenityIds'));
     const openOnly = searchParams.get('openOnly') === 'true';
     const search = searchParams.get('search') || '';
+    const sortParam = searchParams.get('sort');
+    const sort: 'nearest' | 'rating' = sortParam === 'rating' ? 'rating' : 'nearest';
+    const minRatingRaw = parseFloat(searchParams.get('minRating') || '0');
+    const minRating = Number.isFinite(minRatingRaw) && minRatingRaw > 0 ? minRatingRaw : 0;
 
     const apiKey = process.env.GOOGLE_MAPS_SERVER_API_KEY || process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
 
@@ -90,43 +95,45 @@ export async function GET(request: Request) {
             if (data.status === 'OK' && data.results && data.results.length > 0) {
                 const normalizedSearch = search.trim().toLowerCase();
 
-                const stores = data.results
-                    .map((place: GooglePlaceResult) => {
-                        const placeLat = place.geometry.location.lat;
-                        const placeLng = place.geometry.location.lng;
-                        const openNow = place.opening_hours ? !!place.opening_hours.open_now : true;
+                const stores = applyRatingFilterAndSort(
+                    data.results
+                        .map((place: GooglePlaceResult) => {
+                            const placeLat = place.geometry.location.lat;
+                            const placeLng = place.geometry.location.lng;
+                            const openNow = place.opening_hours ? !!place.opening_hours.open_now : true;
 
-                        return {
-                            id: place.place_id,
-                            name: place.name,
-                            address: place.vicinity || 'Địa chỉ đang cập nhật',
-                            lat: placeLat,
-                            lng: placeLng,
-                            rating: typeof place.rating === 'number' ? place.rating : 0,
-                            isOpen: openNow,
-                            is24h: isOpen24Hours(place),
-                            // Google Places không trả về tiện ích chi tiết nên để mảng rỗng
-                            // thay vì gán cứng — filter tiện ích sẽ loại các kết quả này
-                            // một cách trung thực khi người dùng có chọn tiện ích.
-                            amenities: [] as string[],
-                            brandId: inferBrandId(place.name || ''),
-                            distanceMeters: haversineDistanceMeters(lat, lng, placeLat, placeLng),
-                        };
-                    })
-                    .filter((store: { distanceMeters: number; brandId: string; amenities: string[]; isOpen: boolean; is24h: boolean; name: string; address: string }) => {
-                        const withinRadius = store.distanceMeters <= radius;
-                        const matchesBrand = brandIds.length === 0 || brandIds.includes(store.brandId);
-                        const matchesAmenity =
-                            amenityIds.length === 0 || amenityIds.every((amenityId) => store.amenities.includes(amenityId));
-                        const matchesOpen = !openOnly || store.isOpen || store.is24h;
-                        const matchesSearch =
-                            normalizedSearch.length === 0 ||
-                            store.name.toLowerCase().includes(normalizedSearch) ||
-                            store.address.toLowerCase().includes(normalizedSearch);
+                            return {
+                                id: place.place_id,
+                                name: place.name,
+                                address: place.vicinity || 'Địa chỉ đang cập nhật',
+                                lat: placeLat,
+                                lng: placeLng,
+                                rating: typeof place.rating === 'number' ? place.rating : 0,
+                                isOpen: openNow,
+                                is24h: isOpen24Hours(place),
+                                // Google Places không trả về tiện ích chi tiết nên để mảng rỗng
+                                // thay vì gán cứng — filter tiện ích sẽ loại các kết quả này
+                                // một cách trung thực khi người dùng có chọn tiện ích.
+                                amenities: [] as string[],
+                                brandId: inferBrandId(place.name || ''),
+                                distanceMeters: haversineDistanceMeters(lat, lng, placeLat, placeLng),
+                            };
+                        })
+                        .filter((store: { distanceMeters: number; brandId: string; amenities: string[]; isOpen: boolean; is24h: boolean; name: string; address: string }) => {
+                            const withinRadius = store.distanceMeters <= radius;
+                            const matchesBrand = brandIds.length === 0 || brandIds.includes(store.brandId);
+                            const matchesAmenity =
+                                amenityIds.length === 0 || amenityIds.every((amenityId) => store.amenities.includes(amenityId));
+                            const matchesOpen = !openOnly || store.isOpen || store.is24h;
+                            const matchesSearch =
+                                normalizedSearch.length === 0 ||
+                                store.name.toLowerCase().includes(normalizedSearch) ||
+                                store.address.toLowerCase().includes(normalizedSearch);
 
-                        return withinRadius && matchesBrand && matchesAmenity && matchesOpen && matchesSearch;
-                    })
-                    .sort((a: { distanceMeters: number }, b: { distanceMeters: number }) => a.distanceMeters - b.distanceMeters);
+                            return withinRadius && matchesBrand && matchesAmenity && matchesOpen && matchesSearch;
+                        }),
+                    { sort, minRating }
+                );
 
                 return NextResponse.json({ stores, brands: getStoreCatalog().brands, amenities: getStoreCatalog().amenities });
             }
@@ -145,6 +152,8 @@ export async function GET(request: Request) {
             amenityIds,
             openOnly,
             search,
+            sort,
+            minRating,
         }),
     ]);
 
@@ -164,6 +173,8 @@ export async function GET(request: Request) {
         amenityIds,
         openOnly,
         search,
+        sort,
+        minRating,
     });
 
     const { brands, amenities } = getStoreCatalog();

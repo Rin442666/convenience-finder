@@ -37,4 +37,6 @@ export interface StoreFilters {
     amenityIds?: string[];
     openOnly?: boolean;
     search?: string;
+    sort?: 'nearest' | 'rating';
+    minRating?: number;
 }

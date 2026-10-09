@@ -38,7 +38,31 @@ export type StoreFilters = {
   amenityIds?: string[];
   openOnly?: boolean;
   search?: string;
+  // Sắp xếp: 'nearest' (mặc định) hoặc 'rating' (đánh giá cao nhất trước).
+  sort?: 'nearest' | 'rating';
+  // Lọc đánh giá tối thiểu, ví dụ 4.0. Cửa hàng chưa có đánh giá (0) bị loại
+  // khi minRating > 0.
+  minRating?: number;
 };
+
+// Lọc theo đánh giá tối thiểu + sắp xếp kết quả. Dùng chung cho cả seed,
+// SQL và Google Places để 3 nguồn cho kết quả nhất quán.
+export function applyRatingFilterAndSort<T extends { rating: number; distanceMeters?: number }>(
+  stores: T[],
+  filters: { sort?: 'nearest' | 'rating'; minRating?: number }
+): T[] {
+  const minRating = Number(filters.minRating) || 0;
+  const filtered = minRating > 0 ? stores.filter((store) => store.rating >= minRating) : stores;
+  if (filters.sort === 'rating') {
+    return [...filtered].sort((a, b) => {
+      if (b.rating !== a.rating) {
+        return b.rating - a.rating;
+      }
+      return (a.distanceMeters ?? 0) - (b.distanceMeters ?? 0);
+    });
+  }
+  return [...filtered].sort((a, b) => (a.distanceMeters ?? 0) - (b.distanceMeters ?? 0));
+}
 
 export const brands: Brand[] = [
   { id: 'circle-k', name: 'Circle K' },
@@ -338,6 +362,12 @@ export function addStoreToSeed(store: StoreRecord): void {
   }
 }
 
+// Các cửa hàng được thêm động từ yêu cầu đã duyệt (id 'store-req-...').
+// Persistence layer dùng để lưu ra file, giữ lại sau khi restart server.
+export function listDynamicStores(): StoreRecord[] {
+  return initialStoreSeed.filter((store) => store.id.startsWith('store-req-'));
+}
+
 // --- Đánh giá sao ---
 // Mỗi cửa hàng có tổng điểm và số lượt đánh giá (lưu in-memory, giống
 // users và store requests). Seed khởi tạo với SEED_RATING_VOTES lượt "đệm"
@@ -430,10 +460,30 @@ export async function getStoreBaseRating(storeId: string): Promise<number | null
   }
 }
 
-// Tính trạng thái mở/đóng theo giờ hiện tại từ chuỗi openHours ("06:00-23:00").
-// Xử lý cả khung giờ qua đêm ("22:00-06:00"). Nếu không parse được giờ thì
-// giữ nguyên giá trị isOpen có sẵn (dữ liệu DB hoặc Google Places).
-export function computeIsOpenNow(store: { isOpen: boolean; is24h: boolean; openHours?: string }): boolean {
+// Múi giờ dùng để tính giờ mở cửa của cửa hàng (dữ liệu ở Việt Nam).
+export const STORE_TIMEZONE = 'Asia/Ho_Chi_Minh';
+
+// Lấy số phút từ 0h theo giờ Việt Nam, bất kể server đang chạy ở múi giờ nào.
+// (Vercel/host nước ngoài thường chạy UTC, không phải giờ VN.)
+function getMinutesInStoreTimezone(now: Date = new Date()): number {
+    const parts = new Intl.DateTimeFormat('en-GB', {
+        timeZone: STORE_TIMEZONE,
+        hour: '2-digit',
+        minute: '2-digit',
+        hourCycle: 'h23',
+    }).formatToParts(now);
+    const hour = Number(parts.find((part) => part.type === 'hour')?.value ?? '0');
+    const minute = Number(parts.find((part) => part.type === 'minute')?.value ?? '0');
+    if (!Number.isFinite(hour) || !Number.isFinite(minute)) {
+        // Fallback về giờ local của server nếu Intl không hỗ trợ timezone.
+        return now.getHours() * 60 + now.getMinutes();
+    }
+    return hour * 60 + minute;
+}
+// Tính trạng thái mở/đóng theo giờ Việt Nam hiện tại từ chuỗi openHours
+// ("06:00-23:00"). Xử lý cả khung giờ qua đêm ("22:00-06:00"). Nếu không
+// parse được giờ thì giữ nguyên giá trị isOpen có sẵn (dữ liệu DB hoặc Google Places).
+export function computeIsOpenNow(store: { isOpen: boolean; is24h: boolean; openHours?: string }, now?: Date): boolean {
     if (store.is24h) {
         return true;
     }
@@ -449,8 +499,7 @@ export function computeIsOpenNow(store: { isOpen: boolean; is24h: boolean; openH
     ) {
         return store.isOpen;
     }
-    const now = new Date();
-    const nowMinutes = now.getHours() * 60 + now.getMinutes();
+    const nowMinutes = getMinutesInStoreTimezone(now);
     if (closeMinutes > openMinutes) {
         return nowMinutes >= openMinutes && nowMinutes < closeMinutes;
     }
@@ -641,7 +690,7 @@ export async function queryStoresFromDatabase(filters: StoreFilters): Promise<St
 
     const normalizedSearch = (filters.search || '').trim().toLowerCase();
 
-    return mapped
+    const filtered = mapped
       .map((store: StoreRecord) => {
         // Ghi đè rating tĩnh bằng rating trực tiếp (đã gồm đánh giá của user).
         const live = getLiveRating(store.id, store.rating);
@@ -668,8 +717,9 @@ export async function queryStoresFromDatabase(filters: StoreFilters): Promise<St
           store.address.toLowerCase().includes(normalizedSearch);
 
         return withinRadius && matchesBrand && matchesAmenity && matchesOpen && matchesSearch;
-      })
-      .sort((a: StoreRecord & { distanceMeters: number }, b: StoreRecord & { distanceMeters: number }) => (a.distanceMeters ?? 0) - (b.distanceMeters ?? 0));
+      });
+
+    return applyRatingFilterAndSort(filtered, filters);
   } catch (error) {
     console.error('Không thể truy vấn cửa hàng từ SQL Server:', error);
     return null;
@@ -689,7 +739,7 @@ export function queryStores(filters: StoreFilters): StoreRecord[] {
 
   const normalizedSearch = search.trim().toLowerCase();
 
-  return initialStoreSeed
+  const filtered = initialStoreSeed
     .map((store) => {
       // Ghi đè rating tĩnh trong seed bằng rating trực tiếp (đã gồm đánh giá của user).
       const live = getLiveRating(store.id, store.rating);
@@ -697,7 +747,7 @@ export function queryStores(filters: StoreFilters): StoreRecord[] {
         ...store,
         rating: live.rating,
         ratingCount: live.ratingCount,
-        // Ghi đè trạng thái mở/đóng theo giờ hiện tại thay vì dùng giá trị cứng trong seed.
+        // Ghi đè trạng thái mở/đóng theo giờ Việt Nam hiện tại thay vì dùng giá trị cứng trong seed.
         isOpen: computeIsOpenNow(store),
         distanceMeters: haversineDistanceMeters(lat, lng, store.lat, store.lng),
       };
@@ -714,6 +764,7 @@ export function queryStores(filters: StoreFilters): StoreRecord[] {
         store.address.toLowerCase().includes(normalizedSearch);
 
       return withinRadius && matchesBrand && matchesAmenity && matchesOpen && matchesSearch;
-    })
-    .sort((a, b) => (a.distanceMeters ?? 0) - (b.distanceMeters ?? 0));
+    });
+
+  return applyRatingFilterAndSort(filtered, filters);
 }
