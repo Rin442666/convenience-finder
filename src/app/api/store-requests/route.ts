@@ -1,6 +1,5 @@
 import { NextResponse } from 'next/server';
-import { createStoreRequest, listPendingStoreRequests, updateStoreRequestStatus } from '@/lib/auth-system';
-import { ensurePersistenceLoaded, saveApprovedStores, saveStoreRequests } from '@/lib/server-persist';
+import { createStoreRequest, listPendingStoreRequests, updateStoreRequestStatus } from '@/lib/store-requests';
 import { findServerUserById, getSessionFromRequest, sessionHasPermission } from '@/lib/server-auth';
 import { addStoreToSeed, brands, type StoreRecord } from '@/lib/store-db';
 
@@ -13,16 +12,13 @@ export async function GET(req: Request) {
     return NextResponse.json({ requests: [] }, { status: 401 });
   }
 
-  // Nạp dữ liệu đã lưu từ đĩa (nếu có) trước khi liệt kê.
-  ensurePersistenceLoaded();
-
-  return NextResponse.json({ requests: listPendingStoreRequests() });
+  return NextResponse.json({ requests: await listPendingStoreRequests() });
 }
 
 export async function POST(req: Request) {
   try {
     const session = getSessionFromRequest(req);
-    const actor = session ? findServerUserById(session.id) : undefined;
+    const actor = session ? await findServerUserById(session.id) : undefined;
 
     if (!actor || !sessionHasPermission(session, 'submit_store_request')) {
       return NextResponse.json(
@@ -34,7 +30,7 @@ export async function POST(req: Request) {
     const body = await req.json();
 
     // Thông tin người gửi lấy từ session đã xác thực, không lấy từ body.
-    const createdRequest = createStoreRequest({
+    const createdRequest = await createStoreRequest({
       submittedBy: actor.id,
       submittedByName: actor.fullName,
       storeName: String(body.storeName || '').trim(),
@@ -47,8 +43,6 @@ export async function POST(req: Request) {
     });
 
     // Lưu ra file để restart server không mất yêu cầu.
-    ensurePersistenceLoaded();
-    saveStoreRequests();
 
     return NextResponse.json({
       request: createdRequest,
@@ -83,7 +77,7 @@ export async function PATCH(req: Request) {
       );
     }
 
-    const updated = updateStoreRequestStatus(body.requestId, status);
+    const updated = await updateStoreRequestStatus(body.requestId, status);
 
     if (!updated) {
       return NextResponse.json(
@@ -93,8 +87,6 @@ export async function PATCH(req: Request) {
     }
 
     // Lưu trạng thái mới ra file để restart server không bị quay về PENDING.
-    ensurePersistenceLoaded();
-    saveStoreRequests();
 
     // Khi admin duyệt: đưa cửa hàng mới vào danh sách để hiện ngay trên
     // bản đồ/danh sách. Bỏ qua nếu tọa độ không hợp lệ.
@@ -115,9 +107,8 @@ export async function PATCH(req: Request) {
         is24h: false,
         amenities: updated.amenities.filter((amenityId) => validAmenityIds.includes(amenityId)),
       };
-      addStoreToSeed(newStore);
+      await addStoreToSeed(newStore);
       // Lưu cửa hàng đã duyệt ra file để restart server không bị mất.
-      saveApprovedStores();
     }
 
     return NextResponse.json({ request: updated });

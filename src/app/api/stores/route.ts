@@ -135,7 +135,8 @@ export async function GET(request: Request) {
                     { sort, minRating }
                 );
 
-                return NextResponse.json({ stores, brands: getStoreCatalog().brands, amenities: getStoreCatalog().amenities });
+                const googleCatalog = await getStoreCatalog();
+                return NextResponse.json({ stores, brands: googleCatalog.brands, amenities: googleCatalog.amenities });
             }
         } catch (error) {
             console.error('Lỗi khi gọi Google Places API:', error);
@@ -165,7 +166,7 @@ export async function GET(request: Request) {
         });
     }
 
-    const stores = queryStores({
+    const stores = await queryStores({
         lat,
         lng,
         radius,
@@ -177,7 +178,7 @@ export async function GET(request: Request) {
         minRating,
     });
 
-    const { brands, amenities } = getStoreCatalog();
+    const { brands, amenities } = await getStoreCatalog();
 
     return NextResponse.json({
         stores,

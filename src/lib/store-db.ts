@@ -1,6 +1,8 @@
-import sql from 'mssql';
-
-let sharedSqlPool: sql.ConnectionPool | null = null;
+// Tầng dữ liệu cửa hàng — dual-mode SQLite/Postgres qua src/lib/db.ts.
+// Không cần cài SQL Server. Chế độ suy ra từ DATABASE_URL.
+//
+// Lưu ý: module này chỉ dùng ở phía server (API routes).
+import { dbAll, dbGet, dbRun } from './db';
 
 export type Brand = {
   id: string;
@@ -45,41 +47,24 @@ export type StoreFilters = {
   minRating?: number;
 };
 
-// Lọc theo đánh giá tối thiểu + sắp xếp kết quả. Dùng chung cho cả seed,
-// SQL và Google Places để 3 nguồn cho kết quả nhất quán.
-export function applyRatingFilterAndSort<T extends { rating: number; distanceMeters?: number }>(
-  stores: T[],
-  filters: { sort?: 'nearest' | 'rating'; minRating?: number }
-): T[] {
-  const minRating = Number(filters.minRating) || 0;
-  const filtered = minRating > 0 ? stores.filter((store) => store.rating >= minRating) : stores;
-  if (filters.sort === 'rating') {
-    return [...filtered].sort((a, b) => {
-      if (b.rating !== a.rating) {
-        return b.rating - a.rating;
-      }
-      return (a.distanceMeters ?? 0) - (b.distanceMeters ?? 0);
-    });
-  }
-  return [...filtered].sort((a, b) => (a.distanceMeters ?? 0) - (b.distanceMeters ?? 0));
-}
-
+// Danh sách tham chiếu tĩnh (dùng khi cần map tên thương hiệu, ví dụ lúc
+// admin duyệt request). Dữ liệu chuẩn nằm trong DB (db/seed.sql).
 export const brands: Brand[] = [
   { id: 'circle-k', name: 'Circle K' },
   { id: 'winmart', name: 'WinMart+' },
   { id: 'gs25', name: 'GS25' },
   { id: 'familymart', name: 'FamilyMart' },
   { id: '7-eleven', name: '7-Eleven' },
+  { id: 'other', name: 'Khác' },
 ];
 
 export const amenities: Amenity[] = [
-  { id: 'wifi', name: 'Wi‑Fi' },
-  { id: 'parking', name: 'Bãi đậu xe' },
+  { id: 'wifi', name: 'Wi-Fi' },
+  { id: 'parking', name: 'Bãi xe' },
   { id: 'seating', name: 'Chỗ ngồi' },
-  { id: '24h', name: '24/7' },
   { id: 'cashless', name: 'Có chuyển khoản' },
   { id: 'wc', name: 'Nhà vệ sinh' },
-  { id: 'overnight', name: 'Cho phép qua đêm'},
+  { id: 'overnight', name: 'Cho phép qua đêm' },
 ];
 
 export const defaultLocation = {
@@ -87,384 +72,10 @@ export const defaultLocation = {
   lng: 105.80266,
 };
 
-// Seed dữ liệu khởi tạo cho local DB / mock persistence.
-// Đây là dữ liệu bắt đầu, không phải nguồn dữ liệu chính nếu sau này
-// ta nối với SQLite/Postgres thật.
-export const initialStoreSeed: StoreRecord[] = [
-  {
-    id: 'store-1',
-    brandId: 'circle-k',
-    name: 'Circle K Cầu Giấy',
-    address: 'Số 12, Đường Cầu Giấy, Hà Nội',
-    lat: 21.0368,
-    lng: 105.7987,
-    rating: 4.7,
-    isOpen: true,
-    is24h: true,
-    openHours: '24/7',
-    amenities: ['wifi', 'parking', 'cashless'],
-  },
-  {
-    id: 'store-2',
-    brandId: 'winmart',
-    name: 'WinMart+ Quan Hoa',
-    address: 'Ngõ 5, Phố Quan Hoa, Cầu Giấy, Hà Nội',
-    lat: 21.0314,
-    lng: 105.8041,
-    rating: 4.5,
-    isOpen: true,
-    is24h: false,
-    openHours: '06:00-23:00',
-    amenities: ['wifi', 'seating', 'parking'],
-  },
-  {
-    id: 'store-3',
-    brandId: 'gs25',
-    name: 'GS25 Nguyễn Khánh Toàn',
-    address: 'Nguyễn Khánh Toàn, Cầu Giấy, Hà Nội',
-    lat: 21.0389,
-    lng: 105.8092,
-    rating: 4.8,
-    isOpen: true,
-    is24h: true,
-    openHours: '24/7',
-    amenities: ['wifi', 'wc', 'cashless'],
-  },
-  {
-    id: 'store-4',
-    brandId: 'familymart',
-    name: 'FamilyMart Đào Tấn',
-    address: 'Đào Tấn, Ba Đình, Hà Nội',
-    lat: 21.0295,
-    lng: 105.8174,
-    rating: 4.4,
-    isOpen: false,
-    is24h: false,
-    openHours: '08:00-22:00',
-    amenities: ['overnight', 'seating'],
-  },
-  {
-    id: 'store-5',
-    brandId: '7-eleven',
-    name: '7-Eleven Phạm Hùng',
-    address: 'Phạm Hùng, Nam Từ Liêm, Hà Nội',
-    lat: 21.0187,
-    lng: 105.7843,
-    rating: 4.3,
-    isOpen: true,
-    is24h: false,
-    openHours: '07:00-22:00',
-    amenities: ['parking', 'cashless', 'wifi'],
-  },
-  {
-    id: 'store-6',
-    brandId: 'circle-k',
-    name: 'Circle K Lê Văn Lương',
-    address: 'Lê Văn Lương, Thanh Xuân, Hà Nội',
-    lat: 20.9989,
-    lng: 105.8158,
-    rating: 4.6,
-    isOpen: true,
-    is24h: true,
-    openHours: '24/7',
-    amenities: ['wifi', 'parking', 'cashless', 'wc'],
-  },
-  {
-    id: 'store-7',
-    brandId: 'winmart',
-    name: 'WinMart+ Xuân Đỉnh',
-    address: 'Xuân Đỉnh, Bắc Từ Liêm, Hà Nội',
-    lat: 21.0593,
-    lng: 105.7966,
-    rating: 4.5,
-    isOpen: true,
-    is24h: false,
-    openHours: '06:30-22:30',
-    amenities: ['parking', 'cashless', 'seating'],
-  },
-  {
-    id: 'store-8',
-    brandId: 'gs25',
-    name: 'GS25 Hoàng Đạo Thúy',
-    address: 'Hoàng Đạo Thúy, Hà Nội',
-    lat: 21.0243,
-    lng: 105.8035,
-    rating: 4.7,
-    isOpen: true,
-    is24h: true,
-    openHours: '24/7',
-    amenities: ['wifi', 'seating', 'cashless'],
-  },
-  // --- Dữ liệu mẫu mở rộng rải khắp Hà Nội (đợt 2) ---
-  {
-    id: 'store-9',
-    brandId: 'circle-k',
-    name: 'Circle K Hàng Bài',
-    address: 'Số 45, Phố Hàng Bài, Hoàn Kiếm, Hà Nội',
-    lat: 21.0243,
-    lng: 105.8536,
-    rating: 4.6,
-    isOpen: true,
-    is24h: true,
-    openHours: '24/7',
-    amenities: ['wifi', 'cashless', 'wc'],
-  },
-  {
-    id: 'store-10',
-    brandId: 'winmart',
-    name: 'WinMart+ Tràng Tiền',
-    address: 'Số 12, Phố Tràng Tiền, Hoàn Kiếm, Hà Nội',
-    lat: 21.0243,
-    lng: 105.8575,
-    rating: 4.4,
-    isOpen: true,
-    is24h: false,
-    openHours: '06:00-23:00',
-    amenities: ['cashless', 'parking'],
-  },
-  {
-    id: 'store-11',
-    brandId: 'gs25',
-    name: 'GS25 Lý Thường Kiệt',
-    address: 'Số 28, Phố Lý Thường Kiệt, Hoàn Kiếm, Hà Nội',
-    lat: 21.0225,
-    lng: 105.8485,
-    rating: 4.8,
-    isOpen: true,
-    is24h: true,
-    openHours: '24/7',
-    amenities: ['wifi', 'seating', 'cashless', 'wc'],
-  },
-  {
-    id: 'store-12',
-    brandId: 'familymart',
-    name: 'FamilyMart Kim Mã',
-    address: 'Số 360, Phố Kim Mã, Ba Đình, Hà Nội',
-    lat: 21.029,
-    lng: 105.816,
-    rating: 4.3,
-    isOpen: true,
-    is24h: false,
-    openHours: '07:00-23:00',
-    amenities: ['wifi', 'seating'],
-  },
-  {
-    id: 'store-13',
-    brandId: '7-eleven',
-    name: '7-Eleven Liễu Giai',
-    address: 'Số 15, Phố Liễu Giai, Ba Đình, Hà Nội',
-    lat: 21.0335,
-    lng: 105.8095,
-    rating: 4.5,
-    isOpen: true,
-    is24h: true,
-    openHours: '24/7',
-    amenities: ['wifi', 'cashless', 'parking'],
-  },
-  {
-    id: 'store-14',
-    brandId: 'circle-k',
-    name: 'Circle K Tây Sơn',
-    address: 'Số 210, Phố Tây Sơn, Đống Đa, Hà Nội',
-    lat: 21.0125,
-    lng: 105.8245,
-    rating: 4.4,
-    isOpen: true,
-    is24h: false,
-    openHours: '22:00-06:00',
-    amenities: ['wifi', 'overnight', 'cashless'],
-  },
-  {
-    id: 'store-15',
-    brandId: 'winmart',
-    name: 'WinMart+ Chùa Bộc',
-    address: 'Số 68, Phố Chùa Bộc, Đống Đa, Hà Nội',
-    lat: 21.0085,
-    lng: 105.8275,
-    rating: 4.2,
-    isOpen: true,
-    is24h: false,
-    openHours: '06:30-22:30',
-    amenities: ['cashless', 'seating'],
-  },
-  {
-    id: 'store-16',
-    brandId: 'gs25',
-    name: 'GS25 Bạch Mai',
-    address: 'Số 175, Phố Bạch Mai, Hai Bà Trưng, Hà Nội',
-    lat: 21.0075,
-    lng: 105.8475,
-    rating: 4.6,
-    isOpen: true,
-    is24h: true,
-    openHours: '24/7',
-    amenities: ['wifi', 'wc', 'cashless'],
-  },
-  {
-    id: 'store-17',
-    brandId: 'familymart',
-    name: 'FamilyMart Minh Khai',
-    address: 'Số 422, Phố Minh Khai, Hai Bà Trưng, Hà Nội',
-    lat: 21.0055,
-    lng: 105.857,
-    rating: 4.3,
-    isOpen: true,
-    is24h: false,
-    openHours: '08:00-22:00',
-    amenities: ['parking', 'seating'],
-  },
-  {
-    id: 'store-18',
-    brandId: 'circle-k',
-    name: 'Circle K Lạc Long Quân',
-    address: 'Số 88, Phố Lạc Long Quân, Tây Hồ, Hà Nội',
-    lat: 21.0515,
-    lng: 105.811,
-    rating: 4.5,
-    isOpen: true,
-    is24h: true,
-    openHours: '24/7',
-    amenities: ['wifi', 'parking', 'cashless'],
-  },
-  {
-    id: 'store-19',
-    brandId: 'winmart',
-    name: 'WinMart+ Hoàng Quốc Việt',
-    address: 'Số 105, Phố Hoàng Quốc Việt, Bắc Từ Liêm, Hà Nội',
-    lat: 21.0455,
-    lng: 105.7975,
-    rating: 4.4,
-    isOpen: true,
-    is24h: false,
-    openHours: '06:00-22:00',
-    amenities: ['cashless', 'parking', 'wc'],
-  },
-  {
-    id: 'store-20',
-    brandId: '7-eleven',
-    name: '7-Eleven Nguyễn Trãi',
-    address: 'Số 250, Phố Nguyễn Trãi, Thanh Xuân, Hà Nội',
-    lat: 20.9995,
-    lng: 105.8155,
-    rating: 4.6,
-    isOpen: true,
-    is24h: true,
-    openHours: '24/7',
-    amenities: ['wifi', 'seating', 'cashless'],
-  },
-];
-
-// Thêm cửa hàng mới vào seed (dùng khi admin duyệt yêu cầu thêm cửa hàng).
-// Không thêm trùng id để tránh nhân đôi khi duyệt lại.
-export function addStoreToSeed(store: StoreRecord): void {
-  if (!initialStoreSeed.some((item) => item.id === store.id)) {
-    initialStoreSeed.push(store);
-  }
-}
-
-// Các cửa hàng được thêm động từ yêu cầu đã duyệt (id 'store-req-...').
-// Persistence layer dùng để lưu ra file, giữ lại sau khi restart server.
-export function listDynamicStores(): StoreRecord[] {
-  return initialStoreSeed.filter((store) => store.id.startsWith('store-req-'));
-}
-
-// --- Đánh giá sao ---
-// Mỗi cửa hàng có tổng điểm và số lượt đánh giá (lưu in-memory, giống
-// users và store requests). Seed khởi tạo với SEED_RATING_VOTES lượt "đệm"
-// để 1-2 đánh giá mới không làm trung bình nhảy loạn; cửa hàng chưa có
-// rating (0) thì bắt đầu từ 0 lượt.
-const SEED_RATING_VOTES = 20;
-
-type RatingAggregate = { total: number; count: number };
-const ratingAggregates = new Map<string, RatingAggregate>();
-// storeId -> (userId -> stars): mỗi user 1 đánh giá/cửa hàng, chấm lại thì cập nhật.
-const userRatings = new Map<string, Map<string, number>>();
-
-function round1(value: number): number {
-  return Math.round(value * 10) / 10;
-}
-
-function ensureRatingAggregate(storeId: string, baseRating: number): RatingAggregate {
-  const existing = ratingAggregates.get(storeId);
-  if (existing) {
-    return existing;
-  }
-  const count = baseRating > 0 ? SEED_RATING_VOTES : 0;
-  const aggregate: RatingAggregate = { total: round1(baseRating) * count, count };
-  ratingAggregates.set(storeId, aggregate);
-  return aggregate;
-}
-
-// Rating "trực tiếp" để ghi đè lên rating tĩnh của seed/DB khi query.
-export function getLiveRating(storeId: string, baseRating: number): { rating: number; ratingCount: number } {
-  const aggregate = ensureRatingAggregate(storeId, baseRating);
-  if (aggregate.count === 0) {
-    return { rating: 0, ratingCount: 0 };
-  }
-  return { rating: round1(aggregate.total / aggregate.count), ratingCount: aggregate.count };
-}
-
-export function getUserRating(storeId: string, userId: string): number | null {
-  return userRatings.get(storeId)?.get(userId) ?? null;
-}
-
-export function submitStoreRating(
-  storeId: string,
-  userId: string,
-  stars: number,
-  baseRating: number
-): { rating: number; ratingCount: number } | null {
-  if (!Number.isInteger(stars) || stars < 1 || stars > 5) {
-    return null;
-  }
-  const aggregate = ensureRatingAggregate(storeId, baseRating);
-  let perUser = userRatings.get(storeId);
-  if (!perUser) {
-    perUser = new Map<string, number>();
-    userRatings.set(storeId, perUser);
-  }
-  const previous = perUser.get(userId);
-  if (previous === undefined) {
-    aggregate.total += stars;
-    aggregate.count += 1;
-  } else {
-    // Chấm lại: chỉ điều chỉnh phần chênh lệch, không tăng lượt.
-    aggregate.total += stars - previous;
-  }
-  perUser.set(userId, stars);
-  return { rating: round1(aggregate.total / aggregate.count), ratingCount: aggregate.count };
-}
-
-// Rating gốc của cửa hàng (seed hoặc DB). Trả null nếu không tồn tại.
-export async function getStoreBaseRating(storeId: string): Promise<number | null> {
-  const seedStore = initialStoreSeed.find((store) => store.id === storeId);
-  if (seedStore) {
-    return seedStore.rating;
-  }
-  const pool = await getSqlPool();
-  if (!pool) {
-    return null;
-  }
-  try {
-    const request = pool.request();
-    if (/^\d+$/.test(storeId)) {
-      request.input('id', sql.Int, Number(storeId));
-    } else {
-      request.input('id', sql.NVarChar(100), storeId);
-    }
-    const result = await request.query('SELECT CAST(Rating AS float) AS rating FROM dbo.Stores WHERE Id = @id');
-    const row = result.recordset[0];
-    return row ? Number(row.rating) || 0 : null;
-  } catch {
-    return null;
-  }
-}
-
 // Múi giờ dùng để tính giờ mở cửa của cửa hàng (dữ liệu ở Việt Nam).
 export const STORE_TIMEZONE = 'Asia/Ho_Chi_Minh';
 
 // Lấy số phút từ 0h theo giờ Việt Nam, bất kể server đang chạy ở múi giờ nào.
-// (Vercel/host nước ngoài thường chạy UTC, không phải giờ VN.)
 function getMinutesInStoreTimezone(now: Date = new Date()): number {
     const parts = new Intl.DateTimeFormat('en-GB', {
         timeZone: STORE_TIMEZONE,
@@ -480,9 +91,10 @@ function getMinutesInStoreTimezone(now: Date = new Date()): number {
     }
     return hour * 60 + minute;
 }
+
 // Tính trạng thái mở/đóng theo giờ Việt Nam hiện tại từ chuỗi openHours
 // ("06:00-23:00"). Xử lý cả khung giờ qua đêm ("22:00-06:00"). Nếu không
-// parse được giờ thì giữ nguyên giá trị isOpen có sẵn (dữ liệu DB hoặc Google Places).
+// parse được giờ thì giữ nguyên giá trị isOpen có sẵn.
 export function computeIsOpenNow(store: { isOpen: boolean; is24h: boolean; openHours?: string }, now?: Date): boolean {
     if (store.is24h) {
         return true;
@@ -519,214 +131,199 @@ export function haversineDistanceMeters(lat1: number, lng1: number, lat2: number
   return earthRadius * c;
 }
 
-export function getStoreCatalog() {
+// Lọc theo đánh giá tối thiểu + sắp xếp kết quả. Dùng chung cho cả DB
+// và Google Places để các nguồn cho kết quả nhất quán.
+export function applyRatingFilterAndSort<T extends { rating: number; distanceMeters?: number }>(
+  stores: T[],
+  filters: { sort?: 'nearest' | 'rating'; minRating?: number }
+): T[] {
+  const minRating = Number(filters.minRating) || 0;
+  const filtered = minRating > 0 ? stores.filter((store) => store.rating >= minRating) : stores;
+  if (filters.sort === 'rating') {
+    return [...filtered].sort((a, b) => {
+      if (b.rating !== a.rating) {
+        return b.rating - a.rating;
+      }
+      return (a.distanceMeters ?? 0) - (b.distanceMeters ?? 0);
+    });
+  }
+  return [...filtered].sort((a, b) => (a.distanceMeters ?? 0) - (b.distanceMeters ?? 0));
+}
+
+function round1(value: number): number {
+  return Math.round(value * 10) / 10;
+}
+
+// --- Đánh giá sao (lưu trong bảng reviews) ---
+// Mỗi cửa hàng có điểm gốc (base_rating từ seed) + SEED_RATING_VOTES lượt "đệm"
+// để 1-2 đánh giá mới không làm trung bình nhảy loạn — giữ nguyên cách tính
+// của bản in-memory trước đây.
+const SEED_RATING_VOTES = 20;
+
+type StoreRow = {
+  id: string;
+  brand_slug: string;
+  name: string;
+  address: string;
+  lat: number;
+  lng: number;
+  base_rating: number;
+  is_24h: number;
+  open_hours: string | null;
+};
+
+async function getAmenitiesByStore(storeIds: string[]): Promise<Map<string, string[]>> {
+  const map = new Map<string, string[]>();
+  if (storeIds.length === 0) {
+    return map;
+  }
+  const placeholders = storeIds.map(() => '?').join(',');
+  const rows = await dbAll<{ store_id: string; amenity_slug: string }>(
+    `SELECT store_id, amenity_slug FROM store_amenities WHERE store_id IN (${placeholders})`,
+    storeIds
+  );
+  for (const row of rows) {
+    const existing = map.get(row.store_id) || [];
+    existing.push(row.amenity_slug);
+    map.set(row.store_id, existing);
+  }
+  return map;
+}
+
+function toStoreRecord(row: StoreRow, amenities: string[]): StoreRecord {
   return {
-    brands,
+    id: row.id,
+    brandId: row.brand_slug,
+    name: row.name,
+    address: row.address,
+    lat: Number(row.lat),
+    lng: Number(row.lng),
+    rating: Number(row.base_rating) || 0,
+    isOpen: true,
+    is24h: Number(row.is_24h) === 1,
+    openHours: row.open_hours || undefined,
     amenities,
-    stores: [...initialStoreSeed],
   };
 }
 
-function getSqlConfig() {
-  const server = process.env.SQL_SERVER || 'LAPTOP-7QBE5ENO\\SQLEXPRESS';
-  const database = process.env.SQL_DATABASE || 'ConvenienceFinder';
-  const user = process.env.SQL_USERNAME;
-  const password = process.env.SQL_PASSWORD;
-  const instanceName = process.env.SQL_INSTANCE || (server.includes('\\') ? server.split('\\').pop() : undefined);
-  const port = process.env.SQL_PORT ? Number(process.env.SQL_PORT) : undefined;
-
-  const config: any = {
-    server,
-    database,
-    options: {
-      encrypt: false,
-      trustServerCertificate: true,
-      enableArithAbort: true,
-    },
-    pool: {
-      max: 5,
-      min: 0,
-      idleTimeoutMillis: 30000,
-    },
-  };
-
-  if (instanceName && !server.includes('\\')) {
-    config.options.instanceName = instanceName;
-  }
-
-  if (server.includes('\\') && instanceName) {
-    config.options.instanceName = instanceName;
-  }
-
-  if (port && !server.includes('\\') && !instanceName) {
-    config.port = port;
-  }
-
-  if (user && password) {
-    config.user = user;
-    config.password = password;
-  }
-
-  return config;
+// Rating "trực tiếp": điểm gốc + đánh giá của user trong bảng reviews.
+export async function getLiveRating(
+  storeId: string,
+  baseRating: number
+): Promise<{ rating: number; ratingCount: number }> {
+  const row = await dbGet<{ total: number; cnt: number }>(
+    'SELECT COALESCE(SUM(rating), 0) AS total, COUNT(*) AS cnt FROM reviews WHERE store_id = ?',
+    [storeId]
+  );
+  const userVotes = Number(row?.cnt) || 0;
+  const userTotal = Number(row?.total) || 0;
+  const count = SEED_RATING_VOTES + userVotes;
+  const rating = round1((baseRating * SEED_RATING_VOTES + userTotal) / count);
+  return { rating, ratingCount: count };
 }
 
-export async function getSqlPool() {
-  if (sharedSqlPool && sharedSqlPool.connected) {
-    return sharedSqlPool;
-  }
+export async function getUserRating(storeId: string, userId: string): Promise<number | null> {
+  const row = await dbGet<{ rating: number }>(
+    'SELECT rating FROM reviews WHERE store_id = ? AND user_id = ?',
+    [storeId, userId]
+  );
+  return row ? Number(row.rating) : null;
+}
 
-  const config = getSqlConfig();
-
-  try {
-    sharedSqlPool = await sql.connect(config);
-    return sharedSqlPool;
-  } catch (error) {
-    console.error('Không thể kết nối SQL Server. Kiểm tra SQL_SERVER, SQL_DATABASE, SQL_USERNAME, SQL_PASSWORD, SQL_INSTANCE:', error);
-    sharedSqlPool = null;
+export async function submitStoreRating(
+  storeId: string,
+  userId: string,
+  stars: number,
+  baseRating: number
+): Promise<{ rating: number; ratingCount: number } | null> {
+  if (!Number.isInteger(stars) || stars < 1 || stars > 5) {
     return null;
   }
+  // Mỗi user 1 đánh giá/cửa hàng: chấm lại thì cập nhật (UPSERT).
+  // Dùng ISO string từ JS thay vì hàm giờ của từng engine để portable.
+  await dbRun(
+    `INSERT INTO reviews (store_id, user_id, rating, created_at) VALUES (?, ?, ?, ?)
+     ON CONFLICT (store_id, user_id) DO UPDATE SET rating = excluded.rating, created_at = excluded.created_at`,
+    [storeId, userId, stars, new Date().toISOString()]
+  );
+  return getLiveRating(storeId, baseRating);
+}
+
+// Rating gốc của cửa hàng. Trả null nếu không tồn tại.
+export async function getStoreBaseRating(storeId: string): Promise<number | null> {
+  const row = await dbGet<{ base_rating: number }>('SELECT base_rating FROM stores WHERE id = ?', [
+    storeId,
+  ]);
+  return row ? Number(row.base_rating) || 0 : null;
+}
+
+// Thêm cửa hàng mới vào DB (dùng khi admin duyệt yêu cầu thêm cửa hàng).
+// Không thêm trùng id để tránh nhân đôi khi duyệt lại.
+export async function addStoreToSeed(store: StoreRecord): Promise<void> {
+  const existing = await dbGet<{ id: string }>('SELECT id FROM stores WHERE id = ?', [store.id]);
+  if (existing) {
+    return;
+  }
+  await dbRun(
+    `INSERT INTO stores
+     (id, brand_slug, name, address, lat, lng, base_rating, is_24h, open_hours, status, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'ACTIVE', ?)`,
+    [
+      store.id,
+      store.brandId || 'other',
+      store.name,
+      store.address,
+      store.lat,
+      store.lng,
+      store.rating || 0,
+      store.is24h ? 1 : 0,
+      store.openHours || null,
+      new Date().toISOString(),
+    ]
+  );
+  for (const amenityId of store.amenities || []) {
+    const amenityExists = await dbGet<{ slug: string }>(
+      'SELECT slug FROM amenities WHERE slug = ?',
+      [amenityId]
+    );
+    if (amenityExists) {
+      await dbRun('INSERT INTO store_amenities (store_id, amenity_slug) VALUES (?, ?)', [
+        store.id,
+        amenityId,
+      ]);
+    }
+  }
+}
+
+// Các cửa hàng được thêm động từ yêu cầu đã duyệt (id 'store-req-...').
+export async function listDynamicStores(): Promise<StoreRecord[]> {
+  const rows = await dbAll<StoreRow>(
+    `SELECT id, brand_slug, name, address, lat, lng, base_rating, is_24h, open_hours FROM stores WHERE id LIKE 'store-req-%'`
+  );
+  const amenityMap = await getAmenitiesByStore(rows.map((row) => row.id));
+  return rows.map((row) => toStoreRecord(row, amenityMap.get(row.id) || []));
+}
+
+export async function getStoreCatalog() {
+  return (
+    (await getStoreCatalogFromDatabase()) || { brands, amenities, stores: [] as StoreRecord[] }
+  );
 }
 
 export async function getStoreCatalogFromDatabase() {
-  const pool = await getSqlPool();
-
-  if (!pool) {
-    return null;
-  }
-
   try {
-    const [brandResult, amenityResult] = await Promise.all([
-      pool.request().query(`SELECT Slug AS id, Name FROM dbo.Brands ORDER BY Name`),
-      pool.request().query(`SELECT Slug AS id, Name FROM dbo.Amenities ORDER BY Name`),
-    ]);
-
-    return {
-      brands: brandResult.recordset.map((item: any) => ({
-        id: String(item.id),
-        name: String(item.Name),
-      })),
-      amenities: amenityResult.recordset.map((item: any) => ({
-        id: String(item.id),
-        name: String(item.Name),
-      })),
-    };
+    const brandRows = await dbAll<Brand>('SELECT slug AS id, name FROM brands ORDER BY name');
+    const amenityRows = await dbAll<Amenity>('SELECT slug AS id, name FROM amenities ORDER BY name');
+    return { brands: brandRows, amenities: amenityRows };
   } catch (error) {
-    console.error('Không thể truy vấn catalog từ SQL Server:', error);
+    console.error('Không thể truy vấn catalog từ database:', error);
     return null;
   }
 }
 
-export async function queryStoresFromDatabase(filters: StoreFilters): Promise<StoreRecord[] | null> {
-  const pool = await getSqlPool();
+type EnrichedStore = StoreRecord & { distanceMeters: number };
 
-  if (!pool) {
-    return null;
-  }
-
-  try {
-    // Lọc sơ bộ theo bounding-box ngay trong SQL để không phải tải cả bảng
-    // về rồi mới lọc bằng haversine trong JS (rất đắt khi dữ liệu lớn).
-    // 1 độ vĩ độ ≈ 111.32km; 1 độ kinh độ ≈ 111.32km * cos(vĩ độ).
-    // Lọc chính xác theo bán kính tròn vẫn làm ở JS phía dưới.
-    const latDelta = filters.radius / 111320;
-    const lngDelta = filters.radius / (111320 * Math.cos((filters.lat * Math.PI) / 180));
-
-    const storeResult = await pool
-      .request()
-      .input('minLat', sql.Float, filters.lat - latDelta)
-      .input('maxLat', sql.Float, filters.lat + latDelta)
-      .input('minLng', sql.Float, filters.lng - lngDelta)
-      .input('maxLng', sql.Float, filters.lng + lngDelta)
-      .query(`
-      SELECT
-        s.Id,
-        b.Slug AS brandId,
-        s.Name,
-        s.Address,
-        CAST(s.Latitude AS float) AS lat,
-        CAST(s.Longitude AS float) AS lng,
-        CAST(s.Rating AS float) AS rating,
-        CAST(s.IsOpen AS bit) AS isOpen,
-        CAST(s.Is24h AS bit) AS is24h,
-        s.OpenHours
-      FROM dbo.Stores s
-      LEFT JOIN dbo.Brands b ON b.Id = s.BrandId
-      WHERE s.Status = 'ACTIVE'
-        AND s.Latitude BETWEEN @minLat AND @maxLat
-        AND s.Longitude BETWEEN @minLng AND @maxLng
-      ORDER BY s.Name
-    `);
-
-    const amenityResult = await pool.request().query(`
-      SELECT sa.StoreId, a.Slug AS amenityId
-      FROM dbo.StoreAmenities sa
-      JOIN dbo.Amenities a ON a.Id = sa.AmenityId
-      ORDER BY sa.StoreId, a.Slug
-    `);
-
-    const amenitiesByStore = new Map<string, string[]>();
-
-    for (const item of amenityResult.recordset) {
-      const storeId = String(item.StoreId);
-      const amenityId = String(item.amenityId);
-      const existing = amenitiesByStore.get(storeId) || [];
-      existing.push(amenityId);
-      amenitiesByStore.set(storeId, existing);
-    }
-
-    const mapped: StoreRecord[] = storeResult.recordset.map((store: any) => ({
-      id: String(store.Id),
-      brandId: store.brandId ? String(store.brandId) : '',
-      name: String(store.Name),
-      address: String(store.Address),
-      lat: Number(store.lat),
-      lng: Number(store.lng),
-      rating: Number(store.rating) || 0,
-      isOpen: Boolean(store.isOpen),
-      is24h: Boolean(store.is24h),
-      openHours: store.OpenHours ? String(store.OpenHours) : undefined,
-      amenities: amenitiesByStore.get(String(store.Id)) || [],
-    }));
-
-    const normalizedSearch = (filters.search || '').trim().toLowerCase();
-
-    const filtered = mapped
-      .map((store: StoreRecord) => {
-        // Ghi đè rating tĩnh bằng rating trực tiếp (đã gồm đánh giá của user).
-        const live = getLiveRating(store.id, store.rating);
-        return {
-          ...store,
-          rating: live.rating,
-          ratingCount: live.ratingCount,
-          // Ưu tiên giờ mở cửa thực tế thay vì cột IsOpen có thể đã cũ trong DB.
-          isOpen: computeIsOpenNow(store),
-          distanceMeters: haversineDistanceMeters(filters.lat, filters.lng, store.lat, store.lng),
-        };
-      })
-      .filter((store: StoreRecord & { distanceMeters: number }) => {
-        const withinRadius = store.distanceMeters <= (filters.radius || 1000);
-        const selectedBrands = filters.brandIds || [];
-        const selectedAmenities = filters.amenityIds || [];
-        const matchesBrand = selectedBrands.length === 0 || selectedBrands.includes(store.brandId);
-        const matchesAmenity =
-          selectedAmenities.length === 0 || selectedAmenities.every((amenityId) => store.amenities.includes(amenityId));
-        const matchesOpen = !(filters.openOnly) || store.isOpen || store.is24h;
-        const matchesSearch =
-          normalizedSearch.length === 0 ||
-          store.name.toLowerCase().includes(normalizedSearch) ||
-          store.address.toLowerCase().includes(normalizedSearch);
-
-        return withinRadius && matchesBrand && matchesAmenity && matchesOpen && matchesSearch;
-      });
-
-    return applyRatingFilterAndSort(filtered, filters);
-  } catch (error) {
-    console.error('Không thể truy vấn cửa hàng từ SQL Server:', error);
-    return null;
-  }
-}
-
-export function queryStores(filters: StoreFilters): StoreRecord[] {
+async function enrichAndFilterStores(rows: StoreRow[], filters: StoreFilters): Promise<StoreRecord[]> {
   const {
     lat,
     lng,
@@ -737,34 +334,75 @@ export function queryStores(filters: StoreFilters): StoreRecord[] {
     search = '',
   } = filters;
 
+  const amenityMap = await getAmenitiesByStore(rows.map((row) => row.id));
   const normalizedSearch = search.trim().toLowerCase();
 
-  const filtered = initialStoreSeed
-    .map((store) => {
-      // Ghi đè rating tĩnh trong seed bằng rating trực tiếp (đã gồm đánh giá của user).
-      const live = getLiveRating(store.id, store.rating);
-      return {
-        ...store,
+  const enriched = await Promise.all(
+    rows.map(async (row) => {
+      const base: StoreRecord = toStoreRecord(row, amenityMap.get(row.id) || []);
+      // Ghi đè rating tĩnh bằng rating trực tiếp (đã gồm đánh giá của user).
+      const live = await getLiveRating(base.id, base.rating);
+      const enrichedStore: EnrichedStore = {
+        ...base,
         rating: live.rating,
         ratingCount: live.ratingCount,
-        // Ghi đè trạng thái mở/đóng theo giờ Việt Nam hiện tại thay vì dùng giá trị cứng trong seed.
-        isOpen: computeIsOpenNow(store),
-        distanceMeters: haversineDistanceMeters(lat, lng, store.lat, store.lng),
+        // Ưu tiên giờ mở cửa thực tế thay vì dữ liệu tĩnh có thể đã cũ.
+        isOpen: computeIsOpenNow(base),
+        distanceMeters: haversineDistanceMeters(lat, lng, base.lat, base.lng),
       };
+      return enrichedStore;
     })
-    .filter((store) => {
-      const withinRadius = store.distanceMeters <= radius;
-      const matchesBrand = brandIds.length === 0 || brandIds.includes(store.brandId);
-      const matchesAmenity =
-        amenityIds.length === 0 || amenityIds.every((amenityId) => store.amenities.includes(amenityId));
-      const matchesOpen = !openOnly || store.isOpen || store.is24h;
-      const matchesSearch =
-        normalizedSearch.length === 0 ||
-        store.name.toLowerCase().includes(normalizedSearch) ||
-        store.address.toLowerCase().includes(normalizedSearch);
+  );
 
-      return withinRadius && matchesBrand && matchesAmenity && matchesOpen && matchesSearch;
-    });
+  const filtered = enriched.filter((store) => {
+    const withinRadius = store.distanceMeters <= radius;
+    const matchesBrand = brandIds.length === 0 || brandIds.includes(store.brandId);
+    const matchesAmenity =
+      amenityIds.length === 0 || amenityIds.every((amenityId) => store.amenities.includes(amenityId));
+    const matchesOpen = !openOnly || store.isOpen || store.is24h;
+    const matchesSearch =
+      normalizedSearch.length === 0 ||
+      store.name.toLowerCase().includes(normalizedSearch) ||
+      store.address.toLowerCase().includes(normalizedSearch);
+
+    return withinRadius && matchesBrand && matchesAmenity && matchesOpen && matchesSearch;
+  });
 
   return applyRatingFilterAndSort(filtered, filters);
+}
+
+export async function queryStoresFromDatabase(filters: StoreFilters): Promise<StoreRecord[] | null> {
+  try {
+    // Lọc sơ bộ theo bounding-box ngay trong SQL để không phải tải cả bảng
+    // về rồi mới lọc bằng haversine trong JS.
+    // 1 độ vĩ độ ≈ 111.32km; 1 độ kinh độ ≈ 111.32km * cos(vĩ độ).
+    // Lọc chính xác theo bán kính tròn vẫn làm ở JS phía dưới.
+    const latDelta = filters.radius / 111320;
+    const lngDelta = filters.radius / (111320 * Math.cos((filters.lat * Math.PI) / 180));
+
+    const rows = await dbAll<StoreRow>(
+      `SELECT id, brand_slug, name, address, lat, lng, base_rating, is_24h, open_hours
+       FROM stores
+       WHERE status = 'ACTIVE'
+         AND lat BETWEEN ? AND ?
+         AND lng BETWEEN ? AND ?
+       ORDER BY name`,
+      [
+        filters.lat - latDelta,
+        filters.lat + latDelta,
+        filters.lng - lngDelta,
+        filters.lng + lngDelta,
+      ]
+    );
+
+    return enrichAndFilterStores(rows, filters);
+  } catch (error) {
+    console.error('Không thể truy vấn cửa hàng từ database:', error);
+    return null;
+  }
+}
+
+// Giữ tên hàm cũ cho tương thích: dữ liệu đã nằm hết trong database.
+export async function queryStores(filters: StoreFilters): Promise<StoreRecord[]> {
+  return (await queryStoresFromDatabase(filters)) || [];
 }

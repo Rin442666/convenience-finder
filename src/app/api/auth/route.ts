@@ -7,7 +7,7 @@ export async function POST(request: Request) {
     const email = String(body?.email || '').trim();
     const password = String(body?.password || '');
 
-    const user = loginServerUser(email, password);
+    const user = await loginServerUser(email, password);
 
     if (!user) {
       return NextResponse.json(

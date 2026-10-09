@@ -2,6 +2,7 @@
 // không bao giờ import từ client component.
 import crypto from 'crypto';
 import { AppUser, Permission, UserRole, hasPermission, permissionByRole } from './auth-system';
+import { dbGet, dbRun } from './db';
 
 const TOKEN_TTL_MS = 7 * 24 * 60 * 60 * 1000; // token sống 7 ngày
 
@@ -116,42 +117,45 @@ export function sessionHasPermission(session: SessionInfo | null, permission: Pe
 }
 
 // ---------------------------------------------------------------------------
-// User store phía server (thay cho localStorage ở client).
-// Lưu ý: dữ liệu mất khi restart server — phù hợp cho dev/demo,
-// khi lên production nên chuyển sang bảng Users trong SQL Server.
+// User store phía server — SQLite (data/app.db). Tài khoản đăng ký được giữ
+// lại kể cả khi restart server. Lần đầu chạy, 2 tài khoản demo được seed từ
+// db/seed.sql (user@finder.local / admin@finder.local).
 // ---------------------------------------------------------------------------
-const serverUsers: AppUser[] = [
-  {
-    id: 'user-001',
-    fullName: 'Nguyễn Văn User',
-    email: 'user@finder.local',
-    password: hashPassword('123456'),
-    role: 'user',
-    permissions: [...permissionByRole.user],
-    isActive: true,
-  },
-  {
-    id: 'admin-001',
-    fullName: 'Quản trị viên',
-    email: 'admin@finder.local',
-    password: hashPassword('admin123'),
-    role: 'admin',
-    permissions: [...permissionByRole.admin],
-    isActive: true,
-  },
-];
+type UserRow = {
+  id: string;
+  full_name: string;
+  email: string;
+  password_hash: string;
+  role: string;
+  is_active: number;
+};
 
-export function findServerUserById(id: string): AppUser | undefined {
-  return serverUsers.find((user) => user.id === id);
+function rowToAppUser(row: UserRow): AppUser {
+  const role = (row.role === 'admin' ? 'admin' : 'user') as UserRole;
+  return {
+    id: row.id,
+    fullName: row.full_name,
+    email: row.email,
+    password: row.password_hash,
+    role,
+    permissions: [...permissionByRole[role]],
+    isActive: row.is_active === 1,
+  };
 }
 
-export function findServerUserByEmail(email: string): AppUser | undefined {
+export async function findServerUserById(id: string): Promise<AppUser | undefined> {
+  const row = await dbGet<UserRow>('SELECT * FROM users WHERE id = ?', [id]);
+  return row ? rowToAppUser(row) : undefined;
+}
+
+export async function findServerUserByEmail(email: string): Promise<AppUser | undefined> {
   const normalized = email.trim().toLowerCase();
-  return serverUsers.find((user) => user.email.toLowerCase() === normalized);
+  const row = await dbGet<UserRow>('SELECT * FROM users WHERE lower(email) = ?', [normalized]);
+  return row ? rowToAppUser(row) : undefined;
 }
 
-export function loginServerUser(email: string, password: string): AppUser | null {
-  const user = findServerUserByEmail(email);
+export async function loginServerUser(email: string, password: string): Promise<AppUser | null> {
+  const user = await findServerUserByEmail(email);
   if (!user || !user.isActive) {
     return null;
   }
@@ -161,11 +165,11 @@ export function loginServerUser(email: string, password: string): AppUser | null
   return user;
 }
 
-export function registerServerUser(
+export async function registerServerUser(
   fullName: string,
   email: string,
   password: string
-): AppUser | { error: string } {
+): Promise<AppUser | { error: string }> {
   const name = fullName.trim();
   const mail = email.trim();
 
@@ -175,7 +179,7 @@ export function registerServerUser(
   if (password.length < 6) {
     return { error: 'Mật khẩu phải có ít nhất 6 ký tự.' };
   }
-  if (findServerUserByEmail(mail)) {
+  if (await findServerUserByEmail(mail)) {
     return { error: 'Tài khoản này đã tồn tại trong hệ thống.' };
   }
 
@@ -188,7 +192,10 @@ export function registerServerUser(
     permissions: [...permissionByRole.user],
     isActive: true,
   };
-  serverUsers.push(user);
+  await dbRun(
+    'INSERT INTO users (id, full_name, email, password_hash, role, is_active, created_at) VALUES (?, ?, ?, ?, ?, 1, ?)',
+    [user.id, user.fullName, user.email, user.password, user.role, new Date().toISOString()]
+  );
   return user;
 }
 

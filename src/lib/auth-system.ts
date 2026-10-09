@@ -49,26 +49,9 @@ export const permissionByRole: Record<UserRole, Permission[]> = {
   ],
 };
 
-// Tài khoản demo và logic đăng nhập đã chuyển sang `server-auth.ts`
-// (mật khẩu hash + session token). File này chỉ giữ type, quyền
-// và logic nghiệp vụ của store requests.
-
-const storeRequests: StoreRequestRecord[] = [
-  {
-    id: 'req-001',
-    submittedBy: 'user-001',
-    submittedByName: 'Nguyễn Văn User',
-    storeName: 'Mini Mart Hà Đông',
-    brandName: 'FamilyMart',
-    address: 'Đường Hà Đông, Hà Nội',
-    lat: 20.9722,
-    lng: 105.7778,
-    amenities: ['wifi', 'parking'],
-    notes: 'Cửa hàng mới trên tuyến xe buýt trung tâm.',
-    status: 'PENDING',
-    createdAt: new Date().toISOString(),
-  },
-];
+// Tài khoản demo và logic đăng nhập nằm ở `server-auth.ts` (SQLite).
+// Yêu cầu thêm cửa hàng nằm ở `store-requests.ts` (SQLite, server-only).
+// File này chỉ giữ type, quyền và label — an toàn để import từ client.
 
 export function hasPermission(user: Partial<AppUser> | null | undefined, permission: Permission): boolean {
   if (!user || !user.role) {
@@ -79,67 +62,6 @@ export function hasPermission(user: Partial<AppUser> | null | undefined, permiss
   return permissions.includes(permission);
 }
 
-export function listPendingStoreRequests(): StoreRequestRecord[] {
-  return storeRequests.filter((request) => request.status === 'PENDING');
-}
-
-// Truy xuất toàn bộ requests (kể cả đã xử lý) để persistence layer lưu ra file.
-// Tách riêng khỏi listPendingStoreRequests để không lộ logic lọc.
-export function getAllStoreRequests(): StoreRequestRecord[] {
-  return storeRequests;
-}
-
-// Khôi phục requests từ file khi server khởi động (thay cho seed cứng).
-// Không dùng node:fs ở đây để file này vẫn import được từ client component.
-export function restoreStoreRequests(records: StoreRequestRecord[]): void {
-  storeRequests.length = 0;
-  for (const record of records) {
-    storeRequests.push(record);
-  }
-}
-
-export function createStoreRequest(payload: {
-  submittedBy: string;
-  submittedByName: string;
-  storeName: string;
-  brandName: string;
-  address: string;
-  lat: number;
-  lng: number;
-  amenities: string[];
-  notes: string;
-}): StoreRequestRecord {
-  const request: StoreRequestRecord = {
-    id: `req-${Date.now()}`,
-    submittedBy: payload.submittedBy,
-    submittedByName: payload.submittedByName,
-    storeName: payload.storeName,
-    brandName: payload.brandName,
-    address: payload.address,
-    lat: payload.lat,
-    lng: payload.lng,
-    amenities: payload.amenities,
-    notes: payload.notes,
-    status: 'PENDING',
-    createdAt: new Date().toISOString(),
-  };
-
-  storeRequests.unshift(request);
-  return request;
-}
-
-export function updateStoreRequestStatus(requestId: string, status: StoreRequestStatus): StoreRequestRecord | null {
-  const request = storeRequests.find((item) => item.id === requestId);
-
-  if (!request) {
-    return null;
-  }
-
-  request.status = status;
-  return request;
-}
-
 export function getRoleLabel(role: UserRole): string {
   return role === 'admin' ? 'Admin' : 'Người dùng';
 }
-

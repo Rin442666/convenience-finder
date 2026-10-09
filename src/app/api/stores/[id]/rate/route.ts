@@ -15,7 +15,7 @@ export async function GET(req: Request, { params }: RouteParams) {
     return NextResponse.json({ myRating: null });
   }
 
-  return NextResponse.json({ myRating: getUserRating(id, session.id) });
+  return NextResponse.json({ myRating: await getUserRating(id, session.id) });
 }
 
 // Chấm sao 1-5 cho cửa hàng. Yêu cầu đăng nhập + quyền rate_store
@@ -53,7 +53,7 @@ export async function POST(req: Request, { params }: RouteParams) {
     );
   }
 
-  const result = submitStoreRating(id, session.id, stars, baseRating);
+  const result = await submitStoreRating(id, session.id, stars, baseRating);
 
   if (!result) {
     return NextResponse.json(

@@ -50,7 +50,6 @@ function formatRadius(meters: number): string {
 }
 
 const STORAGE_SESSION_KEY = 'finder_session';
-const STORAGE_FAVORITES_KEY = 'finder_favorites';
 
 type AuthMode = 'login' | 'register';
 type MainView = 'main' | 'profile' | 'store-request';
@@ -105,39 +104,6 @@ function clearLegacyAuthData() {
     window.localStorage.removeItem('finder_current_user');
 }
 
-// Danh sách yêu thích lưu theo từng user trong localStorage:
-// { [userId]: [storeId, ...] }. Reset server không mất vì nằm ở client.
-function loadFavorites(userId: string): string[] {
-    if (typeof window === 'undefined') {
-        return [];
-    }
-    try {
-        const saved = window.localStorage.getItem(STORAGE_FAVORITES_KEY);
-        if (!saved) {
-            return [];
-        }
-        const parsed = JSON.parse(saved) as Record<string, unknown>;
-        const ids = parsed[userId];
-        return Array.isArray(ids) ? ids.filter((id): id is string => typeof id === 'string') : [];
-    } catch {
-        return [];
-    }
-}
-
-function persistFavorites(userId: string, storeIds: string[]) {
-    if (typeof window === 'undefined') {
-        return;
-    }
-    try {
-        const saved = window.localStorage.getItem(STORAGE_FAVORITES_KEY);
-        const parsed = (saved ? JSON.parse(saved) : {}) as Record<string, string[]>;
-        parsed[userId] = storeIds;
-        window.localStorage.setItem(STORAGE_FAVORITES_KEY, JSON.stringify(parsed));
-    } catch {
-        // localStorage đầy hoặc bị chặn thì bỏ qua, không crash app.
-    }
-}
-
 // Tên thương hiệu để hiển thị trong modal chi tiết.
 function getBrandName(brandId?: string): string {
     const brand = brandOptions.find((option) => option.id === brandId);
@@ -190,11 +156,21 @@ export default function Home() {
     // localStorage theo session đã lưu; đổi user (login/logout/register)
     // thì cập nhật ngay trong handler, không dùng effect để tránh
     // set-state-in-effect.
-    const [favoriteIds, setFavoriteIds] = useState<string[]>(() => {
-        const saved = loadSession();
-        return saved ? loadFavorites(saved.user.id) : [];
-    });
+    const [favoriteIds, setFavoriteIds] = useState<string[]>([]);
     const [favoritesOnly, setFavoritesOnly] = useState<boolean>(false);
+
+    // Nạp danh sách yêu thích từ server (bảng favorites) sau khi đăng nhập.
+    const refreshFavorites = async (token: string) => {
+        try {
+            const res = await fetch('/api/favorites', {
+                headers: { Authorization: `Bearer ${token}` },
+            });
+            const data = await res.json();
+            setFavoriteIds(Array.isArray(data.storeIds) ? data.storeIds.filter((id: unknown): id is string => typeof id === 'string') : []);
+        } catch {
+            setFavoriteIds([]);
+        }
+    };
     const [currentUser, setCurrentUser] = useState<Omit<AppUser, 'password'> | null>(null);
     const [authToken, setAuthToken] = useState<string | null>(null);
     const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
@@ -355,24 +331,41 @@ export default function Home() {
     };
 
     // Thêm/bỏ cửa hàng khỏi danh sách yêu thích của user đang đăng nhập.
-    const toggleFavorite = (store: Store) => {
+    const toggleFavorite = async (store: Store) => {
         if (!currentUser) {
             toast('Đăng nhập để lưu cửa hàng yêu thích.', 'info');
             setIsAuthModalOpen(true);
             return;
         }
 
-        // Tính danh sách mới trước rồi mới setState + toast. Không được gọi
-        // toast() (setState của ToastHost) bên trong updater của setFavoriteIds
-        // vì updater có thể chạy trong lúc render -> React báo lỗi
-        // "Cannot update a component while rendering a different component".
-        const isFavorite = favoriteIds.includes(store.id);
-        const next = isFavorite
-            ? favoriteIds.filter((id) => id !== store.id)
-            : [...favoriteIds, store.id];
-        setFavoriteIds(next);
-        persistFavorites(currentUser.id, next);
-        toast(isFavorite ? 'Đã bỏ khỏi danh sách yêu thích.' : 'Đã lưu vào danh sách yêu thích.', 'success');
+        try {
+            const res = await fetch('/api/favorites', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
+                },
+                body: JSON.stringify({ storeId: store.id }),
+            });
+            const data = await res.json();
+            if (!res.ok) {
+                toast(data.message || 'Không thể cập nhật danh sách yêu thích.', 'error');
+                return;
+            }
+            // Tính danh sách mới trước rồi mới setState + toast. Không được gọi
+            // toast() (setState của ToastHost) bên trong updater của setFavoriteIds
+            // vì updater có thể chạy trong lúc render -> React báo lỗi
+            // "Cannot update a component while rendering a different component".
+            const favorited = data.favorited === true;
+            const next = favorited
+                ? [...favoriteIds.filter((id) => id !== store.id), store.id]
+                : favoriteIds.filter((id) => id !== store.id);
+            setFavoriteIds(next);
+            toast(favorited ? 'Đã lưu vào danh sách yêu thích.' : 'Đã bỏ khỏi danh sách yêu thích.', 'success');
+        } catch (error) {
+            console.error('Lỗi cập nhật yêu thích:', error);
+            toast('Không thể cập nhật danh sách yêu thích.', 'error');
+        }
     };
 
     // Người dùng click vào bản đồ khi đang ở chế độ chọn vị trí: lấy điểm đó
@@ -411,7 +404,7 @@ export default function Home() {
             setCurrentUser(data.user);
             setAuthToken(data.token);
             persistSession({ token: data.token, user: data.user });
-            setFavoriteIds(loadFavorites(data.user.id));
+            await refreshFavorites(data.token);
             setFavoritesOnly(false);
             setIsAuthModalOpen(false);
             setAccountMenuOpen(false);
@@ -459,7 +452,7 @@ export default function Home() {
             setCurrentUser(data.user);
             setAuthToken(data.token);
             persistSession({ token: data.token, user: data.user });
-            setFavoriteIds(loadFavorites(data.user.id));
+            await refreshFavorites(data.token);
             setFavoritesOnly(false);
             setIsAuthModalOpen(false);
             setAuthMode('login');

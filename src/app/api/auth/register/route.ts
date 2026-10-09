@@ -5,7 +5,7 @@ export async function POST(request: Request) {
   try {
     const body = await request.json();
 
-    const result = registerServerUser(
+    const result = await registerServerUser(
       String(body?.fullName || ''),
       String(body?.email || ''),
       String(body?.password || '')
