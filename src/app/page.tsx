@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef, useCallback, useMemo, useSyncExternalStore } from 'react';
-import { MapPin, Star, Navigation, User, X, SearchX, Heart, Clock, Crosshair, Sun, Moon } from 'lucide-react';
+import { MapPin, Star, Navigation, User, X, SearchX, Heart, Clock, Crosshair, Sun, Moon, SlidersHorizontal, ChevronDown } from 'lucide-react';
 import MapView from '@/components/MapView';
 import ToastHost, { toast } from '@/components/Toast';
 import { AppUser, StoreRequestRecord, getRoleLabel, hasPermission } from '@/lib/auth-system';
@@ -158,6 +158,22 @@ function getDarkModeServerSnapshot(): boolean {
     return false;
 }
 
+// Viewport mobile/desktop: đọc qua useSyncExternalStore (giống darkMode) để
+// lần render đầu của client khớp HTML từ server, tránh hydration mismatch.
+function subscribeMobileViewport(onChange: () => void): () => void {
+    const mq = window.matchMedia('(max-width: 1023px)');
+    mq.addEventListener('change', onChange);
+    return () => mq.removeEventListener('change', onChange);
+}
+
+function getMobileViewportSnapshot(): boolean {
+    return window.matchMedia('(max-width: 1023px)').matches;
+}
+
+function getMobileViewportServerSnapshot(): boolean {
+    return false;
+}
+
 export default function Home() {
     const [userLocation, setUserLocation] = useState<UserLocation>({
         lat: 21.03477,
@@ -191,9 +207,23 @@ export default function Home() {
     const [selectedBrand, setSelectedBrand] = useState<string>('all');
     const [selectedAmenities, setSelectedAmenities] = useState<string[]>([]);
     const [openOnly, setOpenOnly] = useState<boolean>(false);
+    // Thu gọn/mở rộng khối bộ lọc trên mobile (mặc định thu gọn để đỡ chiếm chỗ).
+    // Desktop luôn mở (nút toggle bị ẩn bằng lg:hidden).
+    const isMobileViewport = useSyncExternalStore(subscribeMobileViewport, getMobileViewportSnapshot, getMobileViewportServerSnapshot);
+    const [mobileFiltersOpen, setMobileFiltersOpen] = useState<boolean>(false);
+    const filtersVisible = !isMobileViewport || mobileFiltersOpen;
     // Sắp xếp + lọc theo đánh giá (gửi lên API để cả 3 nguồn dữ liệu xử lý giống nhau).
     const [sortBy, setSortBy] = useState<'nearest' | 'rating'>('nearest');
     const [minRating, setMinRating] = useState<number>(0);
+    // Số bộ lọc đang bật (hiện badge trên nút thu gọn mobile).
+    const activeFilterCount =
+        (searchTerm.trim() ? 1 : 0) +
+        (radius !== 1000 ? 1 : 0) +
+        (selectedBrand !== 'all' ? 1 : 0) +
+        (sortBy !== 'nearest' ? 1 : 0) +
+        (minRating > 0 ? 1 : 0) +
+        selectedAmenities.length +
+        (openOnly ? 1 : 0);
     // Chế độ "chọn vị trí trên bản đồ": bật nút rồi click vào bản đồ để tìm
     // cửa hàng quanh điểm đã chọn thay vì vị trí GPS.
     const [pickingLocation, setPickingLocation] = useState<boolean>(false);
@@ -606,6 +636,11 @@ export default function Home() {
         setFavoritesOnly(false);
         setAccountMenuOpen(false);
         setMainView('main');
+        setRatingPickerStoreId(null);
+        setPickerMyRating(null);
+        setPickerMyComment('');
+        setHoverStars(null);
+        setDetailsStore(null);  
     };
 
     // Nạp tên hiện tại vào form ngay khi mở trang profile.
@@ -1601,6 +1636,23 @@ export default function Home() {
 
             {/* Thanh bộ lọc ngang gọn (thay sidebar dài) + dải thống kê luôn nhìn thấy */}
             <div className="max-w-7xl mx-auto mb-6 rounded-2xl bg-white dark:bg-gray-900 px-4 py-3.5 shadow-md">
+                {/* Nút thu gọn/mở rộng bộ lọc: chỉ hiện trên mobile, desktop luôn mở */}
+                <button
+                    type="button"
+                    onClick={() => setMobileFiltersOpen((prev) => !prev)}
+                    aria-expanded={filtersVisible}
+                    className="lg:hidden mb-1 flex w-full items-center gap-2 rounded-lg px-1 py-1.5 text-sm font-semibold text-gray-700 dark:text-gray-300"
+                >
+                    <SlidersHorizontal className="h-4 w-4" />
+                    Tìm kiếm & bộ lọc
+                    {activeFilterCount > 0 && (
+                        <span className="rounded-full bg-blue-600 px-2 py-0.5 text-xs font-bold text-white">
+                            {activeFilterCount}
+                        </span>
+                    )}
+                    <ChevronDown className={`ml-auto h-4 w-4 transition-transform ${filtersVisible ? 'rotate-180' : ''}`} />
+                </button>
+                <div className={`${filtersVisible ? 'block' : 'hidden'} lg:block`}>
                 <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-[minmax(0,1fr)_130px_160px_180px_160px]">
                     <div>
                         <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Tìm kiếm</label>
@@ -1697,6 +1749,7 @@ export default function Home() {
                         Chỉ đang mở
                     </button>
                 </div>
+                </div>
 
                 {!isLoadingStores && (
                     <div className="mt-4 flex flex-wrap items-center gap-x-5 gap-y-1.5 border-t border-gray-100 dark:border-gray-800 pt-3 text-sm text-gray-600 dark:text-gray-400">
@@ -1786,7 +1839,7 @@ export default function Home() {
                         />
                     </div>
 
-                    <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-md h-[600px] flex flex-col overflow-hidden">
+                    <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-md h-auto lg:h-[600px] flex flex-col overflow-hidden">
                         <div className="shrink-0 p-4 pb-3">
                             <h2 className="font-bold text-base text-gray-800 dark:text-gray-200">
                                 Danh sách cửa hàng ({displayedStores.length})
@@ -1834,13 +1887,13 @@ export default function Home() {
                         )}
 
                         </div>
-                        <div className="flex-1 overflow-y-auto px-4 pb-4">
+                        <div className="flex-1 overflow-x-auto lg:overflow-x-hidden overflow-y-hidden lg:overflow-y-auto px-4 pb-4 snap-x [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
                         {isLoadingStores ? (
-                            <div className="space-y-3" aria-label="Đang tải danh sách cửa hàng">
+                            <div className="flex gap-3 space-y-0 lg:block lg:space-y-3" aria-label="Đang tải danh sách cửa hàng">
                                 {[0, 1, 2].map((skeletonIndex) => (
                                     <div
                                         key={skeletonIndex}
-                                        className="animate-pulse rounded-xl border border-gray-200 dark:border-gray-700 p-4"
+                                        className="w-[82%] shrink-0 snap-start lg:w-auto animate-pulse rounded-xl border border-gray-200 dark:border-gray-700 p-4"
                                     >
                                         <div className="h-4 w-2/3 rounded bg-gray-200 dark:bg-gray-700" />
                                         <div className="mt-2 h-3 w-1/2 rounded bg-gray-200 dark:bg-gray-700" />
@@ -1869,7 +1922,7 @@ export default function Home() {
                                 )}
                             </div>
                         ) : (
-                            <div className="space-y-3">
+                            <div className="flex gap-3 space-y-0 lg:block lg:space-y-3">
                                 {displayedStores.map((store) => {
                                 const isSelected = selectedStore?.id === store.id;
                                 const distanceLabel = formatDistance(store.distanceMeters);
@@ -1881,7 +1934,7 @@ export default function Home() {
                                     <div
                                         key={store.id}
                                         onClick={() => setSelectedStore(store)}
-                                        className={`p-4 rounded-xl border transition-all cursor-pointer ${isSelected
+                                        className={`w-[82%] shrink-0 snap-start lg:w-auto p-4 rounded-xl border transition-all cursor-pointer ${isSelected
                                                 ? 'border-blue-500 bg-blue-50 dark:bg-blue-950/50 shadow-sm'
                                                 : 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-800'
                                             }`}

@@ -46,3 +46,6 @@ next-env.d.ts
 
 # Du lieu runtime (store requests, cua hang da duyet) - khong commit
 data/
+
+# Visual Studio
+.vs/
