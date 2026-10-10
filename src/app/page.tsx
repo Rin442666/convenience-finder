@@ -337,6 +337,10 @@ export default function Home() {
     }, [accountMenuOpen]);
     const [mainView, setMainView] = useState<MainView>('main');
     const [loginForm, setLoginForm] = useState({ email: '', password: '' });
+    const [forgotMode, setForgotMode] = useState(false);
+    const [forgotEmail, setForgotEmail] = useState('');
+    const [forgotSent, setForgotSent] = useState(false);
+    const [sendingForgot, setSendingForgot] = useState(false);
     const [registerForm, setRegisterForm] = useState({ fullName: '', email: '', password: '', confirmPassword: '' });
     const [storeRequestForm, setStoreRequestForm] = useState({
         storeName: '',
@@ -606,9 +610,38 @@ export default function Home() {
             setIsAuthModalOpen(false);
             setAccountMenuOpen(false);
             setAuthMode('login');
+            setForgotMode(false);
         } catch (error) {
             console.error('Lỗi đăng nhập:', error);
             toast('Không thể đăng nhập. Vui lòng thử lại.', 'error');
+        }
+    };
+
+    const handleForgotPassword = async () => {
+        const email = forgotEmail.trim();
+        if (!email) {
+            toast('Vui lòng nhập email.', 'error');
+            return;
+        }
+        setSendingForgot(true);
+        try {
+            const res = await fetch('/api/auth/forgot-password', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ email }),
+            });
+            const data = await res.json();
+            if (!res.ok) {
+                toast(data.message || 'Không gửi được email.', 'error');
+                return;
+            }
+            setForgotSent(true);
+            toast(data.message || 'Đã gửi email đặt lại mật khẩu.', 'success');
+        } catch (error) {
+            console.error('Lỗi quên mật khẩu:', error);
+            toast('Không thể gửi email. Vui lòng thử lại.', 'error');
+        } finally {
+            setSendingForgot(false);
         }
     };
 
@@ -2335,7 +2368,7 @@ export default function Home() {
                             </h2>
                             <button
                                 type="button"
-                                onClick={() => setIsAuthModalOpen(false)}
+                                onClick={() => { setIsAuthModalOpen(false); setForgotMode(false); setForgotSent(false); }}
                                 aria-label="Đóng"
                                 className="rounded-lg p-1.5 text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-gray-700 dark:hover:text-gray-300"
                             >
@@ -2363,6 +2396,46 @@ export default function Home() {
                                         className="w-full rounded-xl border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-4 py-2.5 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-200 dark:focus:ring-blue-800"
                                     />
                                 </div>
+
+                                <div className="text-right">
+                                    <button
+                                        type="button"
+                                        onClick={() => { setForgotMode(!forgotMode); setForgotSent(false); }}
+                                        className="text-sm font-medium text-blue-600 dark:text-blue-400 underline hover:text-blue-800 dark:hover:text-blue-200"
+                                    >
+                                        Quên mật khẩu?
+                                    </button>
+                                </div>
+
+                                {forgotMode && (
+                                    <div className="rounded-xl border border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-950/40 p-4 space-y-3">
+                                        {forgotSent ? (
+                                            <p className="text-sm text-gray-700 dark:text-gray-300">
+                                                Nếu email tồn tại trong hệ thống, link đặt lại mật khẩu (hết hạn sau 15 phút) đã được gửi. Hãy kiểm tra hộp thư của bạn.
+                                            </p>
+                                        ) : (
+                                            <>
+                                                <p className="text-sm text-gray-700 dark:text-gray-300">
+                                                    Nhập email đăng ký, hệ thống sẽ gửi link đặt lại mật khẩu.
+                                                </p>
+                                                <input
+                                                    value={forgotEmail}
+                                                    onChange={(e) => setForgotEmail(e.target.value)}
+                                                    placeholder="Email của bạn"
+                                                    className="w-full rounded-xl border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-4 py-2.5 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-200 dark:focus:ring-blue-800"
+                                                />
+                                                <button
+                                                    type="button"
+                                                    onClick={handleForgotPassword}
+                                                    disabled={sendingForgot}
+                                                    className="w-full rounded-xl bg-blue-600 py-2.5 text-base font-semibold text-white shadow-sm hover:bg-blue-700 disabled:opacity-60"
+                                                >
+                                                    {sendingForgot ? 'Đang gửi...' : 'Gửi link đặt lại'}
+                                                </button>
+                                            </>
+                                        )}
+                                    </div>
+                                )}
 
                                 <button
                                     type="button"

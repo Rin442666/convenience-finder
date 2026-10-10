@@ -200,6 +200,16 @@ async function runMigrations(): Promise<void> {
     const pool = await getPgPool();
     // Postgres hỗ trợ IF NOT EXISTS cho ADD COLUMN.
     await pool.query(`ALTER TABLE reviews ADD COLUMN IF NOT EXISTS comment TEXT NOT NULL DEFAULT ''`);
+    // Bảng token đặt lại mật khẩu (quên mật khẩu qua email).
+    await pool.query(`CREATE TABLE IF NOT EXISTS password_resets (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users (id),
+      token_hash TEXT NOT NULL UNIQUE,
+      expires_at TEXT NOT NULL,
+      used INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT (now()::text)
+    )`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_password_resets_token ON password_resets (token_hash)`);
     return;
   }
   // SQLite không có ADD COLUMN IF NOT EXISTS -> kiểm tra qua PRAGMA.
@@ -207,6 +217,20 @@ async function runMigrations(): Promise<void> {
   const cols = db.prepare(`PRAGMA table_info(reviews)`).all() as { name: string }[];
   if (!cols.some((col) => col.name === 'comment')) {
     db.exec(`ALTER TABLE reviews ADD COLUMN comment TEXT NOT NULL DEFAULT ''`);
+  }
+  const hasResets = db
+    .prepare(`SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'password_resets'`)
+    .get();
+  if (!hasResets) {
+    db.exec(`CREATE TABLE password_resets (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users (id),
+      token_hash TEXT NOT NULL UNIQUE,
+      expires_at TEXT NOT NULL,
+      used INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )`);
+    db.exec(`CREATE INDEX idx_password_resets_token ON password_resets (token_hash)`);
   }
 }
 

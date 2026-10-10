@@ -83,3 +83,16 @@ CREATE TABLE IF NOT EXISTS favorites (
 
 CREATE INDEX IF NOT EXISTS idx_stores_lat_lng ON stores (lat, lng);
 CREATE INDEX IF NOT EXISTS idx_stores_status ON stores (status);
+
+-- Token đặt lại mật khẩu (quên mật khẩu qua email). Token thô chỉ tồn tại
+-- trong email gửi đi, DB chỉ lưu SHA-256 của token, hết hạn sau 15 phút.
+CREATE TABLE IF NOT EXISTS password_resets (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users (id),
+  token_hash TEXT NOT NULL UNIQUE,
+  expires_at TEXT NOT NULL,
+  used INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_password_resets_token ON password_resets (token_hash);
