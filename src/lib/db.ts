@@ -173,6 +173,7 @@ async function doInit(): Promise<void> {
       await pool.query(fs.readFileSync(path.join(schemaDir, 'schema.postgres.sql'), 'utf-8'));
       await pool.query(fs.readFileSync(path.join(schemaDir, 'seed.sql'), 'utf-8'));
     }
+    await runMigrations();
     return;
   }
 
@@ -188,6 +189,24 @@ async function doInit(): Promise<void> {
     db.exec(fs.readFileSync(path.join(schemaDir, 'schema.sql'), 'utf-8'));
     db.exec(fs.readFileSync(path.join(schemaDir, 'seed.sql'), 'utf-8'));
     importLegacyJsonFiles(db);
+  }
+  await runMigrations();
+}
+
+// Migration lũy tiến cho DB đã tồn tại từ trước (không chạy lại schema).
+// Mỗi migration tự kiểm tra đã áp dụng chưa nên gọi lại nhiều lần vẫn an toàn.
+async function runMigrations(): Promise<void> {
+  if (getDbMode() === 'postgres') {
+    const pool = await getPgPool();
+    // Postgres hỗ trợ IF NOT EXISTS cho ADD COLUMN.
+    await pool.query(`ALTER TABLE reviews ADD COLUMN IF NOT EXISTS comment TEXT NOT NULL DEFAULT ''`);
+    return;
+  }
+  // SQLite không có ADD COLUMN IF NOT EXISTS -> kiểm tra qua PRAGMA.
+  const db = requireSqliteDb();
+  const cols = db.prepare(`PRAGMA table_info(reviews)`).all() as { name: string }[];
+  if (!cols.some((col) => col.name === 'comment')) {
+    db.exec(`ALTER TABLE reviews ADD COLUMN comment TEXT NOT NULL DEFAULT ''`);
   }
 }
 

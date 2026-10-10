@@ -223,30 +223,77 @@ export async function getLiveRating(
 }
 
 export async function getUserRating(storeId: string, userId: string): Promise<number | null> {
-  const row = await dbGet<{ rating: number }>(
-    'SELECT rating FROM reviews WHERE store_id = ? AND user_id = ?',
+  const review = await getUserReview(storeId, userId);
+  return review ? review.rating : null;
+}
+
+// Đánh giá (sao + bình luận) của chính user cho cửa hàng.
+export async function getUserReview(
+  storeId: string,
+  userId: string
+): Promise<{ rating: number; comment: string } | null> {
+  const row = await dbGet<{ rating: number; comment: string }>(
+    'SELECT rating, comment FROM reviews WHERE store_id = ? AND user_id = ?',
     [storeId, userId]
   );
-  return row ? Number(row.rating) : null;
+  return row ? { rating: Number(row.rating), comment: String(row.comment ?? '') } : null;
 }
+
+// Độ dài tối đa của bình luận đánh giá.
+export const MAX_REVIEW_COMMENT_LENGTH = 500;
 
 export async function submitStoreRating(
   storeId: string,
   userId: string,
   stars: number,
-  baseRating: number
+  baseRating: number,
+  comment: string
 ): Promise<{ rating: number; ratingCount: number } | null> {
   if (!Number.isInteger(stars) || stars < 1 || stars > 5) {
     return null;
   }
+  const cleanComment = comment.trim().slice(0, MAX_REVIEW_COMMENT_LENGTH);
   // Mỗi user 1 đánh giá/cửa hàng: chấm lại thì cập nhật (UPSERT).
   // Dùng ISO string từ JS thay vì hàm giờ của từng engine để portable.
   await dbRun(
-    `INSERT INTO reviews (store_id, user_id, rating, created_at) VALUES (?, ?, ?, ?)
-     ON CONFLICT (store_id, user_id) DO UPDATE SET rating = excluded.rating, created_at = excluded.created_at`,
-    [storeId, userId, stars, new Date().toISOString()]
+    `INSERT INTO reviews (store_id, user_id, rating, comment, created_at) VALUES (?, ?, ?, ?, ?)
+     ON CONFLICT (store_id, user_id) DO UPDATE SET rating = excluded.rating, comment = excluded.comment, created_at = excluded.created_at`,
+    [storeId, userId, stars, cleanComment, new Date().toISOString()]
   );
   return getLiveRating(storeId, baseRating);
+}
+
+// Danh sách bình luận (có chữ) của một cửa hàng, mới nhất trước.
+// Chỉ lấy các đánh giá có bình luận để hiển thị.
+export interface StoreReview {
+  userId: string;
+  userName: string;
+  rating: number;
+  comment: string;
+  createdAt: string;
+}
+
+export async function listStoreReviews(storeId: string, limit = 20): Promise<StoreReview[]> {
+  const rows = await dbAll<{
+    user_id: string;
+    user_name: string;
+    rating: number;
+    comment: string;
+    created_at: string;
+  }>(
+    `SELECT r.user_id, u.full_name AS user_name, r.rating, r.comment, r.created_at
+     FROM reviews r JOIN users u ON u.id = r.user_id
+     WHERE r.store_id = ? AND r.comment <> ''
+     ORDER BY r.created_at DESC LIMIT ?`,
+    [storeId, limit]
+  );
+  return rows.map((row) => ({
+    userId: String(row.user_id),
+    userName: String(row.user_name ?? 'Người dùng'),
+    rating: Number(row.rating) || 0,
+    comment: String(row.comment ?? ''),
+    createdAt: String(row.created_at ?? ''),
+  }));
 }
 
 // Rating gốc của cửa hàng. Trả null nếu không tồn tại.
@@ -405,4 +452,174 @@ export async function queryStoresFromDatabase(filters: StoreFilters): Promise<St
 // Giữ tên hàm cũ cho tương thích: dữ liệu đã nằm hết trong database.
 export async function queryStores(filters: StoreFilters): Promise<StoreRecord[]> {
   return (await queryStoresFromDatabase(filters)) || [];
+}
+
+// ---------------------------------------------------------------------------
+// Admin: kiểm duyệt đánh giá + quản lý danh mục thương hiệu/tiện ích.
+// ---------------------------------------------------------------------------
+
+export interface AdminReviewItem extends StoreReview {
+  storeId: string;
+  storeName: string;
+}
+
+/** Liệt kê mọi đánh giá trong hệ thống cho admin (kể cả bình luận trống). */
+export async function listAllReviews(limit = 100): Promise<AdminReviewItem[]> {
+  const rows = await dbAll<{
+    store_id: string;
+    store_name: string;
+    user_id: string;
+    user_name: string;
+    rating: number;
+    comment: string;
+    created_at: string;
+  }>(
+    `SELECT r.store_id, s.name AS store_name, r.user_id, u.full_name AS user_name,
+            r.rating, r.comment, r.created_at
+     FROM reviews r
+     JOIN stores s ON s.id = r.store_id
+     JOIN users u ON u.id = r.user_id
+     ORDER BY r.created_at DESC LIMIT ?`,
+    [limit]
+  );
+  return rows.map((row) => ({
+    storeId: String(row.store_id),
+    storeName: String(row.store_name ?? row.store_id),
+    userId: String(row.user_id),
+    userName: String(row.user_name ?? 'Người dùng'),
+    rating: Number(row.rating) || 0,
+    comment: String(row.comment ?? ''),
+    createdAt: String(row.created_at ?? ''),
+  }));
+}
+
+/** Admin xóa một đánh giá vi phạm. Trả true nếu có dòng bị xóa. */
+export async function deleteReview(storeId: string, userId: string): Promise<boolean> {
+  const result = await dbRun('DELETE FROM reviews WHERE store_id = ? AND user_id = ?', [
+    storeId,
+    userId,
+  ]);
+  return result.changes > 0;
+}
+
+/** Slug hợp lệ: chữ thường, số, gạch ngang ngăn cách (vd: "circle-k"). */
+export function normalizeSlug(raw: string): string | null {
+  const slug = raw.trim().toLowerCase().replace(/[\s_]+/g, '-');
+  if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug) || slug.length > 40) {
+    return null;
+  }
+  return slug;
+}
+
+function validateCatalogName(name: string, label: string): { error?: string; clean?: string } {
+  const clean = name.trim();
+  if (!clean || clean.length > 60) {
+    return { error: `${label} phải từ 1 đến 60 ký tự.` };
+  }
+  return { clean };
+}
+
+export async function listBrandsDb(): Promise<Brand[]> {
+  return dbAll<Brand>('SELECT slug AS id, name FROM brands ORDER BY name');
+}
+
+export async function listAmenitiesDb(): Promise<Amenity[]> {
+  return dbAll<Amenity>('SELECT slug AS id, name FROM amenities ORDER BY name');
+}
+
+/** Tìm brand theo tên (không phân biệt hoa thường) — dùng khi duyệt yêu cầu thêm cửa hàng. */
+export async function findBrandByName(name: string): Promise<Brand | null> {
+  const row = await dbGet<Brand>(
+    'SELECT slug AS id, name FROM brands WHERE lower(name) = lower(?)',
+    [name.trim()]
+  );
+  return row ?? null;
+}
+
+export async function createBrand(slug: string, name: string): Promise<{ error?: string }> {
+  const cleanSlug = normalizeSlug(slug);
+  if (!cleanSlug) {
+    return { error: 'Slug chỉ gồm chữ thường, số và gạch ngang (vd: circle-k).' };
+  }
+  const checked = validateCatalogName(name, 'Tên thương hiệu');
+  if (checked.error || !checked.clean) {
+    return { error: checked.error };
+  }
+  const exists = await dbGet('SELECT slug FROM brands WHERE slug = ?', [cleanSlug]);
+  if (exists) {
+    return { error: 'Slug này đã tồn tại.' };
+  }
+  await dbRun('INSERT INTO brands (slug, name) VALUES (?, ?)', [cleanSlug, checked.clean]);
+  return {};
+}
+
+export async function updateBrandName(slug: string, name: string): Promise<{ error?: string }> {
+  const checked = validateCatalogName(name, 'Tên thương hiệu');
+  if (checked.error || !checked.clean) {
+    return { error: checked.error };
+  }
+  const result = await dbRun('UPDATE brands SET name = ? WHERE slug = ?', [checked.clean, slug]);
+  if (result.changes === 0) {
+    return { error: 'Không tìm thấy thương hiệu.' };
+  }
+  return {};
+}
+
+export async function deleteBrand(slug: string): Promise<{ error?: string }> {
+  const inUse = await dbGet<{ count: number }>(
+    'SELECT COUNT(*) AS count FROM stores WHERE brand_slug = ?',
+    [slug]
+  );
+  if (inUse && inUse.count > 0) {
+    return { error: `Đang có ${inUse.count} cửa hàng dùng thương hiệu này, không thể xóa.` };
+  }
+  const result = await dbRun('DELETE FROM brands WHERE slug = ?', [slug]);
+  if (result.changes === 0) {
+    return { error: 'Không tìm thấy thương hiệu.' };
+  }
+  return {};
+}
+
+export async function createAmenity(slug: string, name: string): Promise<{ error?: string }> {
+  const cleanSlug = normalizeSlug(slug);
+  if (!cleanSlug) {
+    return { error: 'Slug chỉ gồm chữ thường, số và gạch ngang (vd: cho-phep-qua-dem).' };
+  }
+  const checked = validateCatalogName(name, 'Tên tiện ích');
+  if (checked.error || !checked.clean) {
+    return { error: checked.error };
+  }
+  const exists = await dbGet('SELECT slug FROM amenities WHERE slug = ?', [cleanSlug]);
+  if (exists) {
+    return { error: 'Slug này đã tồn tại.' };
+  }
+  await dbRun('INSERT INTO amenities (slug, name) VALUES (?, ?)', [cleanSlug, checked.clean]);
+  return {};
+}
+
+export async function updateAmenityName(slug: string, name: string): Promise<{ error?: string }> {
+  const checked = validateCatalogName(name, 'Tên tiện ích');
+  if (checked.error || !checked.clean) {
+    return { error: checked.error };
+  }
+  const result = await dbRun('UPDATE amenities SET name = ? WHERE slug = ?', [checked.clean, slug]);
+  if (result.changes === 0) {
+    return { error: 'Không tìm thấy tiện ích.' };
+  }
+  return {};
+}
+
+export async function deleteAmenity(slug: string): Promise<{ error?: string }> {
+  const inUse = await dbGet<{ count: number }>(
+    'SELECT COUNT(*) AS count FROM store_amenities WHERE amenity_slug = ?',
+    [slug]
+  );
+  if (inUse && inUse.count > 0) {
+    return { error: `Đang có ${inUse.count} cửa hàng dùng tiện ích này, không thể xóa.` };
+  }
+  const result = await dbRun('DELETE FROM amenities WHERE slug = ?', [slug]);
+  if (result.changes === 0) {
+    return { error: 'Không tìm thấy tiện ích.' };
+  }
+  return {};
 }

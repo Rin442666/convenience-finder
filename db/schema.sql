@@ -69,6 +69,7 @@ CREATE TABLE IF NOT EXISTS reviews (
   store_id TEXT NOT NULL REFERENCES stores (id),
   user_id TEXT NOT NULL REFERENCES users (id),
   rating INTEGER NOT NULL CHECK (rating >= 1 AND rating <= 5),
+  comment TEXT NOT NULL DEFAULT '',
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   PRIMARY KEY (store_id, user_id)
 );

@@ -1,22 +1,22 @@
 'use client';
 
-import { useState, useEffect, useRef, useCallback, useSyncExternalStore } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo, useSyncExternalStore } from 'react';
 import { MapPin, Star, Navigation, User, X, SearchX, Heart, Clock, Crosshair, Sun, Moon } from 'lucide-react';
 import MapView from '@/components/MapView';
 import ToastHost, { toast } from '@/components/Toast';
 import { AppUser, StoreRequestRecord, getRoleLabel, hasPermission } from '@/lib/auth-system';
 import { Store, UserLocation } from '@/types/store';
 
-const brandOptions = [
-    { id: 'all', name: 'Tất cả' },
+const fallbackBrandOptions = [
     { id: 'circle-k', name: 'Circle K' },
     { id: 'winmart', name: 'WinMart+' },
     { id: 'gs25', name: 'GS25' },
     { id: 'familymart', name: 'FamilyMart' },
     { id: '7-eleven', name: '7-Eleven' },
+    { id: 'other', name: 'Khác' },
 ];
 
-const amenityOptions = [
+const fallbackAmenityOptions = [
     { id: 'wifi', name: 'Wi‑Fi' },
     { id: 'parking', name: 'Bãi xe' },
     { id: 'seating', name: 'Chỗ ngồi' },
@@ -25,9 +25,26 @@ const amenityOptions = [
     { id: 'overnight', name: 'Cho phép qua đêm' },
 ];
 
-const amenityNameById: Record<string, string> = Object.fromEntries(
-    amenityOptions.map((amenity) => [amenity.id, amenity.name])
-);
+type CatalogItem = { id: string; name: string };
+
+type AdminUserItem = {
+    id: string;
+    fullName: string;
+    email: string;
+    role: string;
+    isActive: boolean;
+    createdAt: string;
+};
+
+type AdminReviewItem = {
+    storeId: string;
+    storeName: string;
+    userId: string;
+    userName: string;
+    rating: number;
+    comment: string;
+    createdAt: string;
+};
 
 // Định dạng khoảng cách: < 1km hiện mét, >= 1km hiện km.
 function formatDistanceValue(meters?: number): string {
@@ -49,10 +66,28 @@ function formatRadius(meters: number): string {
     return meters < 1000 ? `${meters} m` : `${meters / 1000} km`;
 }
 
+// Định dạng ngày bình luận theo kiểu Việt Nam (dd/MM/yyyy).
+function formatReviewDate(iso: string): string {
+    const date = new Date(iso);
+    if (Number.isNaN(date.getTime())) {
+        return '';
+    }
+    return date.toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric' });
+}
+
+// Một bình luận đánh giá (trả về từ GET /api/stores/[id]/reviews).
+interface StoreReviewItem {
+    userId: string;
+    userName: string;
+    rating: number;
+    comment: string;
+    createdAt: string;
+}
+
 const STORAGE_SESSION_KEY = 'finder_session';
 
 type AuthMode = 'login' | 'register';
-type MainView = 'main' | 'profile' | 'store-request';
+type MainView = 'main' | 'profile' | 'store-request' | 'admin';
 
 // Session lưu ở client chỉ gồm token + thông tin công khai của user,
 // KHÔNG bao giờ chứa password.
@@ -102,12 +137,6 @@ function clearLegacyAuthData() {
     }
     window.localStorage.removeItem('finder_users');
     window.localStorage.removeItem('finder_current_user');
-}
-
-// Tên thương hiệu để hiển thị trong modal chi tiết.
-function getBrandName(brandId?: string): string {
-    const brand = brandOptions.find((option) => option.id === brandId);
-    return brand ? brand.name : 'Cửa hàng tiện lợi';
 }
 
 // Dark mode lưu ở class "dark" trên <html> (script chặn trong <head> của
@@ -206,9 +235,38 @@ export default function Home() {
     const [currentUser, setCurrentUser] = useState<Omit<AppUser, 'password'> | null>(null);
     const [authToken, setAuthToken] = useState<string | null>(null);
     const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
+    // State cho tính năng sửa thông tin cá nhân trong trang profile.
+    const [profileName, setProfileName] = useState<string>('');
+    const [profilePwCurrent, setProfilePwCurrent] = useState<string>('');
+    const [profilePwNext, setProfilePwNext] = useState<string>('');
+    const [profilePwConfirm, setProfilePwConfirm] = useState<string>('');
+    const [updatingProfile, setUpdatingProfile] = useState<boolean>(false);
+    const [changingPassword, setChangingPassword] = useState<boolean>(false);
+    // Danh mục thương hiệu/tiện ích lấy từ server (admin quản lý), fallback khi chưa tải được.
+    const [catalogBrands, setCatalogBrands] = useState<CatalogItem[]>(fallbackBrandOptions);
+    const [catalogAmenities, setCatalogAmenities] = useState<CatalogItem[]>(fallbackAmenityOptions);
+    const brandOptions = useMemo(
+        () => [{ id: 'all', name: 'Tất cả' }, ...catalogBrands],
+        [catalogBrands]
+    );
+    const amenityNameById: Record<string, string> = useMemo(
+        () => Object.fromEntries(catalogAmenities.map((amenity) => [amenity.id, amenity.name])),
+        [catalogAmenities]
+    );
+
+    // Tên thương hiệu để hiển thị trong modal chi tiết (danh mục động từ server).
+    function getBrandName(brandId?: string): string {
+        const brand = catalogBrands.find((option) => option.id === brandId);
+        return brand ? brand.name : 'Cửa hàng tiện lợi';
+    }
     // State cho tính năng đánh giá sao trên từng card cửa hàng.
     const [ratingPickerStoreId, setRatingPickerStoreId] = useState<string | null>(null);
     const [pickerMyRating, setPickerMyRating] = useState<number | null>(null);
+    // Bình luận đi kèm đánh giá trong popover chấm sao.
+    const [pickerMyComment, setPickerMyComment] = useState<string>('');
+    // Bình luận hiển thị trong modal chi tiết cửa hàng.
+    const [detailsReviews, setDetailsReviews] = useState<StoreReviewItem[]>([]);
+    const [loadingReviews, setLoadingReviews] = useState<boolean>(false);
     const [hoverStars, setHoverStars] = useState<number | null>(null);
     const [submittingRating, setSubmittingRating] = useState(false);
     const [authMode, setAuthMode] = useState<AuthMode>('login');
@@ -225,6 +283,21 @@ export default function Home() {
         notes: '',
     });
     const [pendingRequests, setPendingRequests] = useState<StoreRequestRecord[]>([]);
+    // State cho panel quản trị: người dùng, kiểm duyệt đánh giá, danh mục.
+    type AdminTab = 'users' | 'reviews' | 'catalog';
+    const [adminTab, setAdminTab] = useState<AdminTab>('users');
+    const [adminUsers, setAdminUsers] = useState<AdminUserItem[]>([]);
+    const [adminReviews, setAdminReviews] = useState<AdminReviewItem[]>([]);
+    const [adminBrands, setAdminBrands] = useState<CatalogItem[]>([]);
+    const [adminAmenities, setAdminAmenities] = useState<CatalogItem[]>([]);
+    const [adminLoadedTab, setAdminLoadedTab] = useState<AdminTab | null>(null);
+    const [newBrandSlug, setNewBrandSlug] = useState<string>('');
+    const [newBrandName, setNewBrandName] = useState<string>('');
+    const [newAmenitySlug, setNewAmenitySlug] = useState<string>('');
+    const [newAmenityName, setNewAmenityName] = useState<string>('');
+    const [editingCatalogSlug, setEditingCatalogSlug] = useState<string | null>(null);
+    const [editingCatalogName, setEditingCatalogName] = useState<string>('');
+    const [confirmDeleteKey, setConfirmDeleteKey] = useState<string | null>(null);
 
     useEffect(() => {
         clearLegacyAuthData();
@@ -233,6 +306,18 @@ export default function Home() {
             setCurrentUser(saved.user);
             setAuthToken(saved.token);
         }
+        // Tải danh mục thương hiệu/tiện ích do admin quản lý (fallback giữ nguyên nếu lỗi).
+        fetch('/api/catalog')
+            .then((res) => (res.ok ? res.json() : null))
+            .then((data) => {
+                if (Array.isArray(data?.brands) && data.brands.length > 0) {
+                    setCatalogBrands(data.brands);
+                }
+                if (Array.isArray(data?.amenities) && data.amenities.length > 0) {
+                    setCatalogAmenities(data.amenities);
+                }
+            })
+            .catch(() => {});
     }, []);
 
     const requestLocation = useCallback(() => {
@@ -414,6 +499,22 @@ export default function Home() {
     const openStoreDetails = (store: Store) => {
         setSelectedStore(store);
         setDetailsStore(store);
+        void loadStoreReviews(store.id);
+    };
+
+    // Tải bình luận đánh giá cho modal chi tiết.
+    const loadStoreReviews = async (storeId: string) => {
+        setDetailsReviews([]);
+        setLoadingReviews(true);
+        try {
+            const res = await fetch(`/api/stores/${encodeURIComponent(storeId)}/reviews`);
+            const data = await res.json();
+            setDetailsReviews(Array.isArray(data.reviews) ? data.reviews : []);
+        } catch {
+            setDetailsReviews([]);
+        } finally {
+            setLoadingReviews(false);
+        }
     };
 
     const handleLogin = async () => {
@@ -507,6 +608,93 @@ export default function Home() {
         setMainView('main');
     };
 
+    // Nạp tên hiện tại vào form ngay khi mở trang profile.
+    const openProfileView = () => {
+        if (currentUser) {
+            setProfileName(currentUser.fullName);
+        }
+        setProfilePwCurrent('');
+        setProfilePwNext('');
+        setProfilePwConfirm('');
+        setMainView('profile');
+        setAccountMenuOpen(false);
+    };
+
+    const handleUpdateProfileName = async () => {
+        if (!currentUser || !authToken) {
+            toast('Bạn cần đăng nhập.', 'error');
+            return;
+        }
+
+        setUpdatingProfile(true);
+        try {
+            const res = await fetch('/api/profile', {
+                method: 'PATCH',
+                headers: {
+                    'Content-Type': 'application/json',
+                    Authorization: `Bearer ${authToken}`,
+                },
+                body: JSON.stringify({ fullName: profileName }),
+            });
+            const data = await res.json();
+
+            if (!res.ok || !data.user) {
+                toast(data.message || 'Không thể cập nhật tên hiển thị.', 'error');
+                return;
+            }
+
+            // Cập nhật ngay user trong state + session lưu local để header hiện tên mới.
+            setCurrentUser(data.user);
+            persistSession({ token: authToken, user: data.user });
+            toast('Đã cập nhật tên hiển thị.', 'success');
+        } catch {
+            toast('Không thể kết nối máy chủ.', 'error');
+        } finally {
+            setUpdatingProfile(false);
+        }
+    };
+
+    const handleChangePassword = async () => {
+        if (!currentUser || !authToken) {
+            toast('Bạn cần đăng nhập.', 'error');
+            return;
+        }
+        if (profilePwNext !== profilePwConfirm) {
+            toast('Mật khẩu mới nhập lại chưa khớp.', 'error');
+            return;
+        }
+
+        setChangingPassword(true);
+        try {
+            const res = await fetch('/api/profile/password', {
+                method: 'PATCH',
+                headers: {
+                    'Content-Type': 'application/json',
+                    Authorization: `Bearer ${authToken}`,
+                },
+                body: JSON.stringify({
+                    currentPassword: profilePwCurrent,
+                    newPassword: profilePwNext,
+                }),
+            });
+            const data = await res.json();
+
+            if (!res.ok) {
+                toast(data.message || 'Không thể đổi mật khẩu.', 'error');
+                return;
+            }
+
+            setProfilePwCurrent('');
+            setProfilePwNext('');
+            setProfilePwConfirm('');
+            toast('Đổi mật khẩu thành công.', 'success');
+        } catch {
+            toast('Không thể kết nối máy chủ.', 'error');
+        } finally {
+            setChangingPassword(false);
+        }
+    };
+
     const handleSubmitStoreRequest = async () => {
         if (!currentUser || !hasPermission(currentUser, 'submit_store_request')) {
             toast('Bạn cần đăng nhập để gửi yêu cầu thêm cửa hàng.', 'error');
@@ -568,6 +756,7 @@ export default function Home() {
 
         setRatingPickerStoreId(store.id);
         setPickerMyRating(null);
+        setPickerMyComment('');
         setHoverStars(null);
 
         try {
@@ -576,6 +765,7 @@ export default function Home() {
             });
             const data = await res.json();
             setPickerMyRating(typeof data.myRating === 'number' ? data.myRating : null);
+            setPickerMyComment(typeof data.myComment === 'string' ? data.myComment : '');
         } catch {
             // Không lấy được đánh giá cũ thì vẫn cho chấm sao bình thường.
         }
@@ -596,7 +786,7 @@ export default function Home() {
                     'Content-Type': 'application/json',
                     ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
                 },
-                body: JSON.stringify({ stars }),
+                body: JSON.stringify({ stars, comment: pickerMyComment }),
             });
             const data = await res.json();
 
@@ -657,6 +847,216 @@ export default function Home() {
             toast('Không thể cập nhật yêu cầu.', 'error');
         }
     };
+
+    // ---- Panel quản trị: người dùng / đánh giá / danh mục (chỉ admin) ----
+    const adminHeaders = (): Record<string, string> => ({
+        ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
+    });
+
+    const loadAdminUsers = async () => {
+        try {
+            const res = await fetch('/api/admin/users', { headers: adminHeaders() });
+            const data = await res.json();
+            if (!res.ok) {
+                toast(data.message || 'Không thể tải danh sách người dùng.', 'error');
+                return;
+            }
+            setAdminUsers(data.users || []);
+        } catch {
+            toast('Không thể kết nối máy chủ.', 'error');
+        } finally {
+            setAdminLoadedTab('users');
+        }
+    };
+
+    const handleToggleUserActive = async (user: AdminUserItem) => {
+        try {
+            const res = await fetch(`/api/admin/users/${encodeURIComponent(user.id)}`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json', ...adminHeaders() },
+                body: JSON.stringify({ isActive: !user.isActive }),
+            });
+            const data = await res.json();
+            if (!res.ok) {
+                toast(data.message || 'Không thể cập nhật tài khoản.', 'error');
+                return;
+            }
+            toast(user.isActive ? 'Đã khóa tài khoản.' : 'Đã mở khóa tài khoản.', 'success');
+            await loadAdminUsers();
+        } catch {
+            toast('Không thể kết nối máy chủ.', 'error');
+        }
+    };
+
+    const loadAdminReviews = async () => {
+        try {
+            const res = await fetch('/api/admin/reviews', { headers: adminHeaders() });
+            const data = await res.json();
+            if (!res.ok) {
+                toast(data.message || 'Không thể tải danh sách đánh giá.', 'error');
+                return;
+            }
+            setAdminReviews(data.reviews || []);
+        } catch {
+            toast('Không thể kết nối máy chủ.', 'error');
+        } finally {
+            setAdminLoadedTab('reviews');
+        }
+    };
+
+    const handleDeleteReview = async (review: AdminReviewItem) => {
+        const key = `review:${review.storeId}:${review.userId}`;
+        if (confirmDeleteKey !== key) {
+            setConfirmDeleteKey(key);
+            return;
+        }
+        setConfirmDeleteKey(null);
+        try {
+            const res = await fetch(
+                `/api/admin/reviews?storeId=${encodeURIComponent(review.storeId)}&userId=${encodeURIComponent(review.userId)}`,
+                { method: 'DELETE', headers: adminHeaders() }
+            );
+            const data = await res.json();
+            if (!res.ok) {
+                toast(data.message || 'Không thể xóa đánh giá.', 'error');
+                return;
+            }
+            toast('Đã xóa đánh giá.', 'success');
+            await loadAdminReviews();
+        } catch {
+            toast('Không thể kết nối máy chủ.', 'error');
+        }
+    };
+
+    const loadAdminCatalog = async () => {
+        try {
+            const [brandRes, amenityRes] = await Promise.all([
+                fetch('/api/admin/brands', { headers: adminHeaders() }),
+                fetch('/api/admin/amenities', { headers: adminHeaders() }),
+            ]);
+            const brandData = await brandRes.json();
+            const amenityData = await amenityRes.json();
+            if (!brandRes.ok || !amenityRes.ok) {
+                toast('Không thể tải danh mục.', 'error');
+                return;
+            }
+            setAdminBrands(brandData.brands || []);
+            setAdminAmenities(amenityData.amenities || []);
+        } catch {
+            toast('Không thể kết nối máy chủ.', 'error');
+        } finally {
+            setAdminLoadedTab('catalog');
+        }
+    };
+
+    const refreshPublicCatalog = async () => {
+        try {
+            const res = await fetch('/api/catalog');
+            const data = await res.json();
+            if (Array.isArray(data?.brands) && data.brands.length > 0) {
+                setCatalogBrands(data.brands);
+            }
+            if (Array.isArray(data?.amenities) && data.amenities.length > 0) {
+                setCatalogAmenities(data.amenities);
+            }
+        } catch {
+            // Giữ danh mục hiện tại nếu tải lại thất bại.
+        }
+    };
+
+    const handleAddCatalogItem = async (kind: 'brands' | 'amenities') => {
+        const slug = kind === 'brands' ? newBrandSlug : newAmenitySlug;
+        const name = kind === 'brands' ? newBrandName : newAmenityName;
+        try {
+            const res = await fetch(`/api/admin/${kind}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', ...adminHeaders() },
+                body: JSON.stringify({ slug, name }),
+            });
+            const data = await res.json();
+            if (!res.ok) {
+                toast(data.message || 'Không thể thêm.', 'error');
+                return;
+            }
+            if (kind === 'brands') {
+                setNewBrandSlug('');
+                setNewBrandName('');
+            } else {
+                setNewAmenitySlug('');
+                setNewAmenityName('');
+            }
+            toast('Đã thêm.', 'success');
+            await loadAdminCatalog();
+            await refreshPublicCatalog();
+        } catch {
+            toast('Không thể kết nối máy chủ.', 'error');
+        }
+    };
+
+    const handleRenameCatalogItem = async (kind: 'brands' | 'amenities', slug: string) => {
+        try {
+            const res = await fetch(`/api/admin/${kind}/${encodeURIComponent(slug)}`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json', ...adminHeaders() },
+                body: JSON.stringify({ name: editingCatalogName }),
+            });
+            const data = await res.json();
+            if (!res.ok) {
+                toast(data.message || 'Không thể đổi tên.', 'error');
+                return;
+            }
+            setEditingCatalogSlug(null);
+            setEditingCatalogName('');
+            toast('Đã đổi tên.', 'success');
+            await loadAdminCatalog();
+            await refreshPublicCatalog();
+        } catch {
+            toast('Không thể kết nối máy chủ.', 'error');
+        }
+    };
+
+    const handleDeleteCatalogItem = async (kind: 'brands' | 'amenities', slug: string) => {
+        const key = `${kind}:${slug}`;
+        if (confirmDeleteKey !== key) {
+            setConfirmDeleteKey(key);
+            return;
+        }
+        setConfirmDeleteKey(null);
+        try {
+            const res = await fetch(`/api/admin/${kind}/${encodeURIComponent(slug)}`, {
+                method: 'DELETE',
+                headers: adminHeaders(),
+            });
+            const data = await res.json();
+            if (!res.ok) {
+                toast(data.message || 'Không thể xóa.', 'error');
+                return;
+            }
+            toast('Đã xóa.', 'success');
+            await loadAdminCatalog();
+            await refreshPublicCatalog();
+        } catch {
+            toast('Không thể kết nối máy chủ.', 'error');
+        }
+    };
+
+    // Tải dữ liệu admin khi mở trang quản trị (chỉ khi đang đăng nhập bằng admin).
+    useEffect(() => {
+        if (mainView !== 'admin' || currentUser?.role !== 'admin') {
+            return;
+        }
+        async function fetchCurrentAdminTab() {
+            if (adminTab === 'users') {
+                await loadAdminUsers();
+            } else if (adminTab === 'reviews') {
+                await loadAdminReviews();
+            } else {
+                await loadAdminCatalog();
+            }
+        }
+        fetchCurrentAdminTab();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [mainView, adminTab, currentUser?.role]);
 
     // Mở Google Maps chỉ đường. Dùng chung cho card và modal chi tiết.
     const openDirections = (store: Store) => {
@@ -722,14 +1122,23 @@ export default function Home() {
                                 <div className="absolute right-0 top-full z-20 mt-2 w-64 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 p-2 shadow-lg">
                                     <button
                                         type="button"
-                                        onClick={() => {
-                                            setMainView('profile');
-                                            setAccountMenuOpen(false);
-                                        }}
+                                        onClick={openProfileView}
                                         className="block w-full rounded-lg px-3 py-2 text-left text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800"
                                     >
                                         Xem thông tin tài khoản
                                     </button>
+                                    {currentUser.role === 'admin' && (
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                setMainView('admin');
+                                                setAccountMenuOpen(false);
+                                            }}
+                                            className="block w-full rounded-lg px-3 py-2 text-left text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800"
+                                        >
+                                            Quản trị hệ thống
+                                        </button>
+                                    )}
                                     <button
                                         type="button"
                                         onClick={() => {
@@ -792,8 +1201,62 @@ export default function Home() {
                             <p className="mt-1 text-lg font-semibold text-gray-800 dark:text-gray-200">{getRoleLabel(currentUser.role)}</p>
                         </div>
                         <div className="rounded-xl bg-gray-50 dark:bg-gray-800 p-4 md:col-span-2">
-                            <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Email</p>
+                            <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Username/Email</p>
                             <p className="mt-1 text-lg font-semibold text-gray-800 dark:text-gray-200">{currentUser.email}</p>
+                        </div>
+                    </div>
+
+                    <div className="mt-4 grid gap-4 md:grid-cols-2">
+                        <div className="rounded-xl bg-gray-50 dark:bg-gray-800 p-4">
+                            <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Đổi tên hiển thị</p>
+                            <input
+                                type="text"
+                                value={profileName}
+                                onChange={(e) => setProfileName(e.target.value)}
+                                placeholder="Tên hiển thị mới"
+                                maxLength={50}
+                                className="mt-2 w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm text-gray-800 dark:text-gray-200"
+                            />
+                            <button
+                                type="button"
+                                disabled={updatingProfile}
+                                onClick={handleUpdateProfileName}
+                                className="mt-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
+                            >
+                                {updatingProfile ? 'Đang lưu...' : 'Lưu tên'}
+                            </button>
+                        </div>
+                        <div className="rounded-xl bg-gray-50 dark:bg-gray-800 p-4">
+                            <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Đổi mật khẩu</p>
+                            <input
+                                type="password"
+                                value={profilePwCurrent}
+                                onChange={(e) => setProfilePwCurrent(e.target.value)}
+                                placeholder="Mật khẩu hiện tại"
+                                className="mt-2 w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm text-gray-800 dark:text-gray-200"
+                            />
+                            <input
+                                type="password"
+                                value={profilePwNext}
+                                onChange={(e) => setProfilePwNext(e.target.value)}
+                                placeholder="Mật khẩu mới (ít nhất 6 ký tự)"
+                                className="mt-2 w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm text-gray-800 dark:text-gray-200"
+                            />
+                            <input
+                                type="password"
+                                value={profilePwConfirm}
+                                onChange={(e) => setProfilePwConfirm(e.target.value)}
+                                placeholder="Nhập lại mật khẩu mới"
+                                className="mt-2 w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm text-gray-800 dark:text-gray-200"
+                            />
+                            <button
+                                type="button"
+                                disabled={changingPassword}
+                                onClick={handleChangePassword}
+                                className="mt-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
+                            >
+                                {changingPassword ? 'Đang lưu...' : 'Đổi mật khẩu'}
+                            </button>
                         </div>
                     </div>
                 </div>
@@ -909,6 +1372,233 @@ export default function Home() {
                 </div>
             )}
 
+            {/* Panel quản trị: người dùng / kiểm duyệt đánh giá / danh mục */}
+            {mainView === 'admin' && currentUser && currentUser.role === 'admin' && (
+                <div className="max-w-7xl mx-auto mb-6 rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 p-5 shadow-sm">
+                    <div className="flex items-center justify-between gap-3">
+                        <h3 className="text-lg font-bold text-gray-900 dark:text-gray-100">Quản trị hệ thống</h3>
+                        <button
+                            type="button"
+                            onClick={() => setMainView('main')}
+                            className="text-sm text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-200"
+                        >
+                            Quay lại
+                        </button>
+                    </div>
+                    <div className="mt-3 flex gap-2 border-b border-gray-200 dark:border-gray-700">
+                        {(
+                            [
+                                { id: 'users', label: 'Người dùng' },
+                                { id: 'reviews', label: 'Đánh giá' },
+                                { id: 'catalog', label: 'Danh mục' },
+                            ] as { id: AdminTab; label: string }[]
+                        ).map((tab) => (
+                            <button
+                                key={tab.id}
+                                type="button"
+                                onClick={() => {
+                                    setAdminTab(tab.id);
+                                    setConfirmDeleteKey(null);
+                                    setEditingCatalogSlug(null);
+                                }}
+                                className={`px-4 py-2 text-sm font-semibold border-b-2 -mb-px ${
+                                    adminTab === tab.id
+                                        ? 'border-blue-600 text-blue-600 dark:text-blue-400'
+                                        : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'
+                                }`}
+                            >
+                                {tab.label}
+                            </button>
+                        ))}
+                    </div>
+
+                    {adminLoadedTab !== adminTab && (
+                        <p className="mt-4 text-sm text-gray-500 dark:text-gray-400">Đang tải...</p>
+                    )}
+
+                    {adminLoadedTab === adminTab && adminTab === 'users' && (
+                        <div className="mt-4 overflow-x-auto">
+                            <table className="w-full text-sm">
+                                <thead>
+                                    <tr className="text-left text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                                        <th className="py-2 pr-3">Họ tên</th>
+                                        <th className="py-2 pr-3">Username/Email</th>
+                                        <th className="py-2 pr-3">Vai trò</th>
+                                        <th className="py-2 pr-3">Trạng thái</th>
+                                        <th className="py-2 pr-3">Ngày tạo</th>
+                                        <th className="py-2">Thao tác</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {adminUsers.map((user) => (
+                                        <tr key={user.id} className="border-t border-gray-100 dark:border-gray-800">
+                                            <td className="py-2 pr-3 font-medium text-gray-800 dark:text-gray-200">{user.fullName}</td>
+                                            <td className="py-2 pr-3 text-gray-600 dark:text-gray-400">{user.email}</td>
+                                            <td className="py-2 pr-3 text-gray-600 dark:text-gray-400">{getRoleLabel(user.role as 'user' | 'admin')}</td>
+                                            <td className="py-2 pr-3">
+                                                <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${user.isActive ? 'bg-green-100 dark:bg-green-900 text-green-700 dark:text-green-300' : 'bg-red-100 dark:bg-red-900 text-red-700 dark:text-red-300'}`}>
+                                                    {user.isActive ? 'Hoạt động' : 'Đã khóa'}
+                                                </span>
+                                            </td>
+                                            <td className="py-2 pr-3 text-xs text-gray-500 dark:text-gray-400">{user.createdAt}</td>
+                                            <td className="py-2">
+                                                {user.id !== currentUser.id && (
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => handleToggleUserActive(user)}
+                                                        className={`rounded-lg px-3 py-1.5 text-xs font-medium text-white ${user.isActive ? 'bg-red-600 hover:bg-red-700' : 'bg-green-600 hover:bg-green-700'}`}
+                                                    >
+                                                        {user.isActive ? 'Khóa' : 'Mở khóa'}
+                                                    </button>
+                                                )}
+                                            </td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                            {adminUsers.length === 0 && (
+                                <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">Chưa có người dùng.</p>
+                            )}
+                        </div>
+                    )}
+
+                    {adminLoadedTab === adminTab && adminTab === 'reviews' && (
+                        <div className="mt-4 space-y-3">
+                            {adminReviews.map((review) => {
+                                const key = `review:${review.storeId}:${review.userId}`;
+                                return (
+                                    <div key={key} className="rounded-xl border border-gray-200 dark:border-gray-700 p-4">
+                                        <div className="flex items-center justify-between gap-3">
+                                            <div>
+                                                <p className="font-semibold text-gray-800 dark:text-gray-200">
+                                                    {review.storeName}
+                                                    <span className="ml-2 text-sm font-normal text-amber-600 dark:text-amber-400">
+                                                        {'★'.repeat(review.rating)}{'☆'.repeat(5 - review.rating)}
+                                                    </span>
+                                                </p>
+                                                <p className="text-xs text-gray-500 dark:text-gray-400">
+                                                    {review.userName} • {review.createdAt}
+                                                </p>
+                                            </div>
+                                            <button
+                                                type="button"
+                                                onClick={() => handleDeleteReview(review)}
+                                                className={`rounded-lg px-3 py-1.5 text-xs font-medium text-white ${confirmDeleteKey === key ? 'bg-red-700' : 'bg-red-600 hover:bg-red-700'}`}
+                                            >
+                                                {confirmDeleteKey === key ? 'Chắc chắn xóa?' : 'Xóa'}
+                                            </button>
+                                        </div>
+                                        {review.comment ? (
+                                            <p className="mt-2 text-sm text-gray-700 dark:text-gray-300">{review.comment}</p>
+                                        ) : (
+                                            <p className="mt-2 text-xs italic text-gray-400 dark:text-gray-500">(không có bình luận)</p>
+                                        )}
+                                    </div>
+                                );
+                            })}
+                            {adminReviews.length === 0 && (
+                                <p className="text-sm text-gray-500 dark:text-gray-400">Chưa có đánh giá nào.</p>
+                            )}
+                        </div>
+                    )}
+
+                    {adminLoadedTab === adminTab && adminTab === 'catalog' && (
+                        <div className="mt-4 grid gap-6 md:grid-cols-2">
+                            {(
+                                [
+                                    { kind: 'brands', title: 'Thương hiệu', items: adminBrands, slug: newBrandSlug, setSlug: setNewBrandSlug, name: newBrandName, setName: setNewBrandName },
+                                    { kind: 'amenities', title: 'Tiện ích', items: adminAmenities, slug: newAmenitySlug, setSlug: setNewAmenitySlug, name: newAmenityName, setName: setNewAmenityName },
+                                ] as const
+                            ).map((section) => (
+                                <div key={section.kind}>
+                                    <h4 className="font-semibold text-gray-800 dark:text-gray-200">{section.title}</h4>
+                                    <div className="mt-2 flex gap-2">
+                                        <input
+                                            value={section.slug}
+                                            onChange={(e) => section.setSlug(e.target.value)}
+                                            placeholder="slug (vd: circle-k)"
+                                            className="w-2/5 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm text-gray-800 dark:text-gray-200"
+                                        />
+                                        <input
+                                            value={section.name}
+                                            onChange={(e) => section.setName(e.target.value)}
+                                            placeholder="Tên hiển thị"
+                                            className="flex-1 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm text-gray-800 dark:text-gray-200"
+                                        />
+                                        <button
+                                            type="button"
+                                            onClick={() => handleAddCatalogItem(section.kind)}
+                                            className="rounded-lg bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700"
+                                        >
+                                            Thêm
+                                        </button>
+                                    </div>
+                                    <ul className="mt-3 space-y-2">
+                                        {section.items.map((item) => {
+                                            const deleteKey = `${section.kind}:${item.id}`;
+                                            const editingKey = `${section.kind}:${item.id}`;
+                                            return (
+                                                <li key={item.id} className="flex items-center gap-2 rounded-lg bg-gray-50 dark:bg-gray-800 px-3 py-2">
+                                                    <span className="text-xs text-gray-400 dark:text-gray-500 w-24 truncate">{item.id}</span>
+                                                    {editingCatalogSlug === editingKey ? (
+                                                        <>
+                                                            <input
+                                                                value={editingCatalogName}
+                                                                onChange={(e) => setEditingCatalogName(e.target.value)}
+                                                                className="flex-1 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-2 py-1 text-sm text-gray-800 dark:text-gray-200"
+                                                            />
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => handleRenameCatalogItem(section.kind, item.id)}
+                                                                className="rounded-lg bg-blue-600 px-2 py-1 text-xs font-medium text-white hover:bg-blue-700"
+                                                            >
+                                                                Lưu
+                                                            </button>
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => setEditingCatalogSlug(null)}
+                                                                className="rounded-lg px-2 py-1 text-xs text-gray-500 dark:text-gray-400 hover:text-gray-700"
+                                                            >
+                                                                Hủy
+                                                            </button>
+                                                        </>
+                                                    ) : (
+                                                        <>
+                                                            <span className="flex-1 text-sm font-medium text-gray-800 dark:text-gray-200">{item.name}</span>
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => {
+                                                                    setEditingCatalogSlug(editingKey);
+                                                                    setEditingCatalogName(item.name);
+                                                                    setConfirmDeleteKey(null);
+                                                                }}
+                                                                className="rounded-lg px-2 py-1 text-xs text-blue-600 dark:text-blue-400 hover:underline"
+                                                            >
+                                                                Sửa
+                                                            </button>
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => handleDeleteCatalogItem(section.kind, item.id)}
+                                                                className={`rounded-lg px-2 py-1 text-xs font-medium text-white ${confirmDeleteKey === deleteKey ? 'bg-red-700' : 'bg-red-600 hover:bg-red-700'}`}
+                                                            >
+                                                                {confirmDeleteKey === deleteKey ? 'Chắc chắn?' : 'Xóa'}
+                                                            </button>
+                                                        </>
+                                                    )}
+                                                </li>
+                                            );
+                                        })}
+                                    </ul>
+                                </div>
+                            ))}
+                            <p className="md:col-span-2 text-xs text-gray-500 dark:text-gray-400">
+                                Slug dùng làm định danh (chữ thường, số, gạch ngang). Không xóa được mục đang có cửa hàng sử dụng. Thay đổi áp dụng ngay cho bộ lọc ngoài trang chính.
+                            </p>
+                        </div>
+                    )}
+                </div>
+            )}
+
             {/* Thanh bộ lọc ngang gọn (thay sidebar dài) + dải thống kê luôn nhìn thấy */}
             <div className="max-w-7xl mx-auto mb-6 rounded-2xl bg-white dark:bg-gray-900 px-4 py-3.5 shadow-md">
                 <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-[minmax(0,1fr)_130px_160px_180px_160px]">
@@ -980,7 +1670,7 @@ export default function Home() {
                 </div>
 
                 <div className="mt-3 flex flex-wrap items-center gap-2">
-                    {amenityOptions.map((amenity) => {
+                    {catalogAmenities.map((amenity) => {
                         const active = selectedAmenities.includes(amenity.id);
                         return (
                             <button
@@ -1248,7 +1938,7 @@ export default function Home() {
                                                 {ratingPickerStoreId === store.id && (
                                                     <div
                                                         onClick={(e) => e.stopPropagation()}
-                                                        className="absolute right-0 z-20 mt-1 w-44 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 p-3 shadow-lg"
+                                                        className="absolute right-0 z-20 mt-1 w-64 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 p-3 shadow-lg"
                                                     >
                                                         <p className="mb-2 text-xs font-medium text-gray-700 dark:text-gray-300">
                                                             Đánh giá của bạn
@@ -1265,7 +1955,7 @@ export default function Home() {
                                                                         type="button"
                                                                         disabled={submittingRating}
                                                                         onMouseEnter={() => setHoverStars(starValue)}
-                                                                        onClick={() => submitRating(store, starValue)}
+                                                                        onClick={() => setPickerMyRating(starValue)}
                                                                         className="disabled:opacity-50"
                                                                         aria-label={`${starValue} sao`}
                                                                     >
@@ -1279,11 +1969,36 @@ export default function Home() {
                                                                 );
                                                             })}
                                                         </div>
-                                                        {pickerMyRating !== null && (
+                                                        <textarea
+                                                            value={pickerMyComment}
+                                                            onChange={(e) => setPickerMyComment(e.target.value.slice(0, 500))}
+                                                            rows={2}
+                                                            maxLength={500}
+                                                            disabled={submittingRating}
+                                                            placeholder="Viết bình luận (không bắt buộc)..."
+                                                            className="mt-2 w-full resize-none rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 px-2.5 py-2 text-xs text-gray-800 dark:text-gray-200 placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
+                                                        />
+                                                        {pickerMyRating !== null ? (
                                                             <p className="mt-2 text-[11px] text-gray-500 dark:text-gray-400">
-                                                                Bạn đã chấm {pickerMyRating} sao. Chấm lại để cập nhật.
+                                                                Bạn đã chấm {pickerMyRating} sao. Sửa sao/bình luận rồi bấm Lưu để cập nhật.
+                                                            </p>
+                                                        ) : (
+                                                            <p className="mt-2 text-[11px] text-gray-500 dark:text-gray-400">
+                                                                Chọn số sao, viết bình luận (nếu muốn) rồi bấm Lưu.
                                                             </p>
                                                         )}
+                                                        <button
+                                                            type="button"
+                                                            disabled={submittingRating || pickerMyRating === null}
+                                                            onClick={() => {
+                                                                if (pickerMyRating !== null) {
+                                                                    submitRating(store, pickerMyRating);
+                                                                }
+                                                            }}
+                                                            className="mt-2 w-full rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
+                                                        >
+                                                            {submittingRating ? 'Đang lưu...' : 'Lưu đánh giá'}
+                                                        </button>
                                                         <button
                                                             type="button"
                                                             onClick={() => setRatingPickerStoreId(null)}
@@ -1436,6 +2151,53 @@ export default function Home() {
                             </div>
                         )}
 
+                        <div className="mt-4">
+                            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                                Bình luận đánh giá{detailsReviews.length > 0 && ` (${detailsReviews.length})`}
+                            </p>
+                            {loadingReviews ? (
+                                <p className="text-xs text-gray-400 dark:text-gray-500">Đang tải bình luận...</p>
+                            ) : detailsReviews.length === 0 ? (
+                                <p className="text-xs text-gray-400 dark:text-gray-500">
+                                    Chưa có bình luận nào. Hãy là người đầu tiên đánh giá!
+                                </p>
+                            ) : (
+                                <div className="max-h-48 space-y-2 overflow-y-auto pr-1">
+                                    {detailsReviews.map((review) => (
+                                        <div
+                                            key={`${review.userId}-${review.createdAt}`}
+                                            className="rounded-xl bg-gray-50 dark:bg-gray-800 p-3"
+                                        >
+                                            <div className="flex items-center justify-between gap-2">
+                                                <span className="truncate text-xs font-semibold text-gray-800 dark:text-gray-200">
+                                                    {review.userName}
+                                                </span>
+                                                <span className="flex shrink-0 items-center gap-0.5" aria-label={`${review.rating} sao`}>
+                                                    {[1, 2, 3, 4, 5].map((starValue) => (
+                                                        <Star
+                                                            key={starValue}
+                                                            className={`h-3 w-3 ${starValue <= review.rating
+                                                                    ? 'fill-amber-400 text-amber-400'
+                                                                    : 'text-gray-300 dark:text-gray-600'
+                                                                }`}
+                                                        />
+                                                    ))}
+                                                </span>
+                                            </div>
+                                            <p className="mt-1 break-words whitespace-pre-wrap text-xs text-gray-600 dark:text-gray-400">
+                                                {review.comment}
+                                            </p>
+                                            {formatReviewDate(review.createdAt) && (
+                                                <p className="mt-1 text-[10px] text-gray-400 dark:text-gray-500">
+                                                    {formatReviewDate(review.createdAt)}
+                                                </p>
+                                            )}
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+
                         <div className="mt-6 flex gap-2">
                             <button
                                 type="button"
@@ -1486,7 +2248,7 @@ export default function Home() {
                         {authMode === 'login' ? (
                             <div className="space-y-4">
                                 <div>
-                                    <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">Tài khoản:</label>
+                                    <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">Username/Email:</label>
                                     <input
                                         value={loginForm.email}
                                         onChange={(e) => setLoginForm({ ...loginForm, email: e.target.value })}
@@ -1535,7 +2297,7 @@ export default function Home() {
                                 </div>
 
                                 <div>
-                                    <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">Tài khoản:</label>
+                                    <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">Username/Email:</label>
                                     <input
                                         value={registerForm.email}
                                         onChange={(e) => setRegisterForm({ ...registerForm, email: e.target.value })}

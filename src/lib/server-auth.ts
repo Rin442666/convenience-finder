@@ -2,7 +2,7 @@
 // không bao giờ import từ client component.
 import crypto from 'crypto';
 import { AppUser, Permission, UserRole, hasPermission, permissionByRole } from './auth-system';
-import { dbGet, dbRun } from './db';
+import { dbAll, dbGet, dbRun } from './db';
 
 const TOKEN_TTL_MS = 7 * 24 * 60 * 60 * 1000; // token sống 7 ngày
 
@@ -154,10 +154,16 @@ export async function findServerUserByEmail(email: string): Promise<AppUser | un
   return row ? rowToAppUser(row) : undefined;
 }
 
-export async function loginServerUser(email: string, password: string): Promise<AppUser | null> {
+export async function loginServerUser(
+  email: string,
+  password: string
+): Promise<AppUser | { locked: true } | null> {
   const user = await findServerUserByEmail(email);
-  if (!user || !user.isActive) {
+  if (!user) {
     return null;
+  }
+  if (!user.isActive) {
+    return { locked: true };
   }
   if (!verifyPassword(password, user.password)) {
     return null;
@@ -209,4 +215,105 @@ export function toPublicUser(user: AppUser): Omit<AppUser, 'password'> {
     permissions: [...user.permissions],
     isActive: user.isActive,
   };
+}
+
+/** Cập nhật tên hiển thị của user. */
+export async function updateServerUserFullName(
+  userId: string,
+  fullName: string
+): Promise<AppUser | { error: string }> {
+  const name = fullName.trim();
+  if (name.length < 2 || name.length > 50) {
+    return { error: 'Tên hiển thị phải từ 2 đến 50 ký tự.' };
+  }
+  const row = await dbGet<UserRow>('SELECT * FROM users WHERE id = ?', [userId]);
+  if (!row) {
+    return { error: 'Không tìm thấy tài khoản.' };
+  }
+  await dbRun('UPDATE users SET full_name = ? WHERE id = ?', [name, userId]);
+  return rowToAppUser({ ...row, full_name: name });
+}
+
+/**
+ * Đổi mật khẩu: phải nhập đúng mật khẩu hiện tại.
+ * Mật khẩu mới được hash bằng scrypt giống lúc đăng ký.
+ */
+export async function changeServerUserPassword(
+  userId: string,
+  currentPassword: string,
+  newPassword: string
+): Promise<AppUser | { error: string }> {
+  if (newPassword.length < 6) {
+    return { error: 'Mật khẩu mới phải có ít nhất 6 ký tự.' };
+  }
+  if (currentPassword === newPassword) {
+    return { error: 'Mật khẩu mới phải khác mật khẩu hiện tại.' };
+  }
+  const row = await dbGet<UserRow>('SELECT * FROM users WHERE id = ?', [userId]);
+  if (!row || row.is_active !== 1) {
+    return { error: 'Không tìm thấy tài khoản.' };
+  }
+  if (!verifyPassword(currentPassword, row.password_hash)) {
+    return { error: 'Mật khẩu hiện tại không đúng.' };
+  }
+  await dbRun('UPDATE users SET password_hash = ? WHERE id = ?', [
+    hashPassword(newPassword),
+    userId,
+  ]);
+  return rowToAppUser(row);
+}
+
+/** Thông tin user cho trang admin — KHÔNG bao giờ gồm password. */
+export type AdminUserItem = Omit<AppUser, 'password'> & { createdAt: string };
+
+type UserRowWithCreated = UserRow & { created_at: string };
+
+/**
+ * Kiểm tra request có phải của admin đang hoạt động không.
+ * Tra lại DB thay vì tin role trong token (phòng khi admin bị hạ quyền/khóa mà token còn hạn).
+ */
+export async function requireAdmin(request: Request): Promise<AppUser | null> {
+  const session = getSessionFromRequest(request);
+  if (!session) {
+    return null;
+  }
+  const user = await findServerUserById(session.id);
+  if (!user || !user.isActive || user.role !== 'admin') {
+    return null;
+  }
+  return user;
+}
+
+/** Liệt kê toàn bộ user cho admin (không trả password hash). */
+export async function listServerUsers(): Promise<AdminUserItem[]> {
+  const rows = await dbAll<UserRowWithCreated>(
+    'SELECT id, full_name, email, password_hash, role, is_active, created_at FROM users ORDER BY created_at ASC'
+  );
+  return rows.map((row) => ({ ...toPublicUser(rowToAppUser(row)), createdAt: row.created_at }));
+}
+
+/** Admin khóa/mở khóa tài khoản. Không cho tự khóa chính mình và không cho khóa admin cuối cùng. */
+export async function setServerUserActive(
+  adminId: string,
+  targetId: string,
+  isActive: boolean
+): Promise<{ ok: true } | { error: string }> {
+  if (adminId === targetId) {
+    return { error: 'Không thể tự khóa tài khoản của chính mình.' };
+  }
+  const target = await dbGet<UserRow>('SELECT * FROM users WHERE id = ?', [targetId]);
+  if (!target) {
+    return { error: 'Không tìm thấy tài khoản.' };
+  }
+  if (!isActive && target.role === 'admin') {
+    const remaining = await dbGet<{ count: number }>(
+      "SELECT COUNT(*) AS count FROM users WHERE role = 'admin' AND is_active = 1 AND id != ?",
+      [targetId]
+    );
+    if (!remaining || remaining.count === 0) {
+      return { error: 'Không thể khóa admin cuối cùng còn hoạt động.' };
+    }
+  }
+  await dbRun('UPDATE users SET is_active = ? WHERE id = ?', [isActive ? 1 : 0, targetId]);
+  return { ok: true };
 }

@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createStoreRequest, listPendingStoreRequests, updateStoreRequestStatus } from '@/lib/store-requests';
 import { findServerUserById, getSessionFromRequest, sessionHasPermission } from '@/lib/server-auth';
-import { addStoreToSeed, brands, type StoreRecord } from '@/lib/store-db';
+import { addStoreToSeed, findBrandByName, listAmenitiesDb, type StoreRecord } from '@/lib/store-db';
 
 export async function GET(req: Request) {
   // Quyền admin được suy ra từ session token đã verify,
@@ -91,10 +91,10 @@ export async function PATCH(req: Request) {
     // Khi admin duyệt: đưa cửa hàng mới vào danh sách để hiện ngay trên
     // bản đồ/danh sách. Bỏ qua nếu tọa độ không hợp lệ.
     if (updated.status === 'APPROVED' && Number.isFinite(updated.lat) && Number.isFinite(updated.lng) && updated.lat !== 0 && updated.lng !== 0) {
-      const brand = brands.find(
-        (item) => item.name.trim().toLowerCase() === updated.brandName.trim().toLowerCase()
-      );
-      const validAmenityIds = ['wifi', 'parking', 'seating', '24h', 'cashless', 'wc', 'overnight'];
+      // Tra thương hiệu theo tên từ DB (danh mục do admin quản lý, không fix cứng).
+      const brand = await findBrandByName(updated.brandName);
+      const dbAmenities = await listAmenitiesDb();
+      const validAmenityIds = dbAmenities.map((amenity) => amenity.id);
       const newStore: StoreRecord = {
         id: `store-req-${updated.id}`,
         brandId: brand ? brand.id : 'other',
