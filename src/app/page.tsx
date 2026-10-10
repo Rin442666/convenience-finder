@@ -1782,13 +1782,11 @@ export default function Home() {
                     >
                         Chỉ đang mở
                     </button>
-                </div>
-                <div className="mt-3">
                     <button
                         type="button"
                         onClick={applyFilters}
                         disabled={!hasPendingFilters}
-                        className={`w-full lg:w-auto rounded-xl px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition ${hasPendingFilters
+                        className={`ml-auto w-full sm:w-auto rounded-xl px-5 py-2 text-sm font-semibold text-white shadow-sm transition ${hasPendingFilters
                                 ? 'bg-blue-600 hover:bg-blue-700'
                                 : 'bg-gray-300 dark:bg-gray-700 cursor-not-allowed'
                             }`}

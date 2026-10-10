@@ -154,7 +154,7 @@ export async function GET(request: Request) {
                 // Ghi đè khoảng cách đường chim bay bằng khoảng cách đường bộ (OSRM)
                 // rồi sắp xếp lại, cho khớp với số Google Maps báo khi bấm "Chỉ đường".
                 const googleStores = applyRatingFilterAndSort(
-                    await applyRoadDistances(stores, { lat, lng }, radius),
+                    await applyRoadDistances(stores, { lat, lng }),
                     { sort, minRating }
                 );
 
@@ -183,9 +183,9 @@ export async function GET(request: Request) {
 
     if (dbCatalog && dbStores) {
         // Ghi đè khoảng cách đường chim bay bằng khoảng cách đường bộ (OSRM)
-        // rồi lọc/sắp xếp lại, cho khớp với số Google Maps báo khi bấm "Chỉ đường".
+        // rồi sắp xếp lại. Lọc bán kính vẫn theo đường chim bay như trước.
         const roadStores = applyRatingFilterAndSort(
-            await applyRoadDistances(dbStores, { lat, lng }, radius),
+            await applyRoadDistances(dbStores, { lat, lng }),
             { sort, minRating }
         );
         return NextResponse.json({
@@ -209,7 +209,7 @@ export async function GET(request: Request) {
 
     const { brands, amenities } = await getStoreCatalog();
     const roadMockStores = applyRatingFilterAndSort(
-        await applyRoadDistances(mockStores, { lat, lng }, radius),
+        await applyRoadDistances(mockStores, { lat, lng }),
         { sort, minRating }
     );
 

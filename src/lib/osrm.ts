@@ -79,24 +79,21 @@ export async function getRoadDistances(
 }
 
 /**
- * Ghi đè distanceMeters của từng cửa hàng bằng khoảng cách đường bộ (nếu lấy được),
- * rồi lọc lại theo bán kính. Vì đường bộ luôn >= đường chim bay, danh sách đầu vào
- * đã lọc bằng haversine là tập superset nên không sót cửa hàng nào.
+ * Ghi đè distanceMeters của từng cửa hàng bằng khoảng cách đường bộ (nếu lấy được).
+ * KHÔNG lọc theo bán kính ở đây — lọc bán kính vẫn dùng đường chim bay như trước
+ * (khớp với vòng tròn bán kính trên bản đồ); chỉ số hiển thị/sắp xếp là đường bộ.
  */
 export async function applyRoadDistances<T extends LatLng & { distanceMeters?: number }>(
   stores: T[],
-  origin: LatLng,
-  radius: number
+  origin: LatLng
 ): Promise<T[]> {
   if (stores.length === 0) {
     return stores;
   }
   const roads = await getRoadDistances(origin, stores);
-  return stores
-    .map((store, i) => {
-      const road = roads[i];
-      const base = store.distanceMeters ?? 0;
-      return { ...store, distanceMeters: typeof road === 'number' ? road : base };
-    })
-    .filter((store) => (store.distanceMeters ?? 0) <= radius);
+  return stores.map((store, i) => {
+    const road = roads[i];
+    const base = store.distanceMeters ?? 0;
+    return { ...store, distanceMeters: typeof road === 'number' ? road : base };
+  });
 }
