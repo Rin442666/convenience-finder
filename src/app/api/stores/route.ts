@@ -1,4 +1,5 @@
 ﻿import { NextResponse } from 'next/server';
+import { applyRoadDistances } from '@/lib/osrm';
 import {
   applyRatingFilterAndSort,
   getStoreCatalog,
@@ -60,6 +61,21 @@ function inferBrandId(placeName: string): string {
     return 'other';
 }
 
+// Kiểu cửa hàng chuẩn hóa từ Google Places (đầy đủ tọa độ để tính đường bộ).
+type GoogleStoreItem = {
+    id: string;
+    name: string;
+    address: string;
+    lat: number;
+    lng: number;
+    rating: number;
+    isOpen: boolean;
+    is24h: boolean;
+    amenities: string[];
+    brandId: string;
+    distanceMeters: number;
+};
+
 // Kiểm tra có phải mở 24/7 thật không dựa trên weekday_text
 // (ví dụ: "Monday: Open 24 hours"). Không suy ra từ open_now.
 function isOpen24Hours(place: { opening_hours?: { weekday_text?: unknown } } | null | undefined): boolean {
@@ -95,7 +111,7 @@ export async function GET(request: Request) {
             if (data.status === 'OK' && data.results && data.results.length > 0) {
                 const normalizedSearch = search.trim().toLowerCase();
 
-                const stores = applyRatingFilterAndSort(
+                const stores = applyRatingFilterAndSort<GoogleStoreItem>(
                     data.results
                         .map((place: GooglePlaceResult) => {
                             const placeLat = place.geometry.location.lat;
@@ -135,8 +151,15 @@ export async function GET(request: Request) {
                     { sort, minRating }
                 );
 
+                // Ghi đè khoảng cách đường chim bay bằng khoảng cách đường bộ (OSRM)
+                // rồi sắp xếp lại, cho khớp với số Google Maps báo khi bấm "Chỉ đường".
+                const googleStores = applyRatingFilterAndSort(
+                    await applyRoadDistances(stores, { lat, lng }, radius),
+                    { sort, minRating }
+                );
+
                 const googleCatalog = await getStoreCatalog();
-                return NextResponse.json({ stores, brands: googleCatalog.brands, amenities: googleCatalog.amenities });
+                return NextResponse.json({ stores: googleStores, brands: googleCatalog.brands, amenities: googleCatalog.amenities });
             }
         } catch (error) {
             console.error('Lỗi khi gọi Google Places API:', error);
@@ -159,14 +182,20 @@ export async function GET(request: Request) {
     ]);
 
     if (dbCatalog && dbStores) {
+        // Ghi đè khoảng cách đường chim bay bằng khoảng cách đường bộ (OSRM)
+        // rồi lọc/sắp xếp lại, cho khớp với số Google Maps báo khi bấm "Chỉ đường".
+        const roadStores = applyRatingFilterAndSort(
+            await applyRoadDistances(dbStores, { lat, lng }, radius),
+            { sort, minRating }
+        );
         return NextResponse.json({
-            stores: dbStores,
+            stores: roadStores,
             brands: dbCatalog.brands,
             amenities: dbCatalog.amenities,
         });
     }
 
-    const stores = await queryStores({
+    const mockStores = await queryStores({
         lat,
         lng,
         radius,
@@ -179,9 +208,13 @@ export async function GET(request: Request) {
     });
 
     const { brands, amenities } = await getStoreCatalog();
+    const roadMockStores = applyRatingFilterAndSort(
+        await applyRoadDistances(mockStores, { lat, lng }, radius),
+        { sort, minRating }
+    );
 
     return NextResponse.json({
-        stores,
+        stores: roadMockStores,
         brands,
         amenities,
     });

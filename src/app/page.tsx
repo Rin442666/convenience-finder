@@ -192,18 +192,6 @@ export default function Home() {
     const [radius, setRadius] = useState<number>(1000);
     const [selectedStore, setSelectedStore] = useState<Store | null>(null);
     const [searchTerm, setSearchTerm] = useState<string>('');
-    // Debounce ô tìm kiếm 400ms để không bắn request theo từng ký tự gõ.
-    // Debounce đặt trong event handler thay vì useEffect để tránh
-    // setState đồng bộ trong effect (gây cảnh báo lint).
-    const [debouncedSearchTerm, setDebouncedSearchTerm] = useState<string>('');
-    const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-    const handleSearchChange = (value: string) => {
-        setSearchTerm(value);
-        if (searchDebounceRef.current) {
-            clearTimeout(searchDebounceRef.current);
-        }
-        searchDebounceRef.current = setTimeout(() => setDebouncedSearchTerm(value), 400);
-    };
     const [selectedBrand, setSelectedBrand] = useState<string>('all');
     const [selectedAmenities, setSelectedAmenities] = useState<string[]>([]);
     const [openOnly, setOpenOnly] = useState<boolean>(false);
@@ -224,6 +212,37 @@ export default function Home() {
         (minRating > 0 ? 1 : 0) +
         selectedAmenities.length +
         (openOnly ? 1 : 0);
+    // Bộ lọc nháp: người dùng chỉnh ở các control dưới đây, bấm "Áp dụng bộ lọc"
+    // mới đẩy sang state thật và gọi API một lần (trước đây chạm vào control nào
+    // là reload ngay control đó).
+    const [draftSearchTerm, setDraftSearchTerm] = useState<string>('');
+    const [draftRadius, setDraftRadius] = useState<number>(1000);
+    const [draftSelectedBrand, setDraftSelectedBrand] = useState<string>('all');
+    const [draftSelectedAmenities, setDraftSelectedAmenities] = useState<string[]>([]);
+    const [draftOpenOnly, setDraftOpenOnly] = useState<boolean>(false);
+    const [draftSortBy, setDraftSortBy] = useState<'nearest' | 'rating'>('nearest');
+    const [draftMinRating, setDraftMinRating] = useState<number>(0);
+    // Có thay đổi nào chưa được áp dụng không (để bật/tắt nút "Áp dụng").
+    const hasPendingFilters =
+        draftSearchTerm.trim() !== searchTerm.trim() ||
+        draftRadius !== radius ||
+        draftSelectedBrand !== selectedBrand ||
+        draftSortBy !== sortBy ||
+        draftMinRating !== minRating ||
+        draftOpenOnly !== openOnly ||
+        draftSelectedAmenities.length !== selectedAmenities.length ||
+        draftSelectedAmenities.some((id) => !selectedAmenities.includes(id));
+    const applyFilters = () => {
+        setSearchTerm(draftSearchTerm);
+        setRadius(draftRadius);
+        setSelectedBrand(draftSelectedBrand);
+        setSelectedAmenities(draftSelectedAmenities);
+        setOpenOnly(draftOpenOnly);
+        setSortBy(draftSortBy);
+        setMinRating(draftMinRating);
+        // Trên mobile thu gọn khối lọc lại để thấy kết quả ngay.
+        setMobileFiltersOpen(false);
+    };
     // Chế độ "chọn vị trí trên bản đồ": bật nút rồi click vào bản đồ để tìm
     // cửa hàng quanh điểm đã chọn thay vì vị trí GPS.
     const [pickingLocation, setPickingLocation] = useState<boolean>(false);
@@ -301,6 +320,21 @@ export default function Home() {
     const [submittingRating, setSubmittingRating] = useState(false);
     const [authMode, setAuthMode] = useState<AuthMode>('login');
     const [accountMenuOpen, setAccountMenuOpen] = useState(false);
+    const accountMenuRef = useRef<HTMLDivElement>(null);
+    // Đóng menu tài khoản khi bấm ra ngoài (setState trong listener, không phải
+    // đồng bộ trong effect body, nên không vi phạm lint set-state-in-effect).
+    useEffect(() => {
+        if (!accountMenuOpen) {
+            return;
+        }
+        const handlePointerDown = (event: MouseEvent) => {
+            if (accountMenuRef.current && !accountMenuRef.current.contains(event.target as Node)) {
+                setAccountMenuOpen(false);
+            }
+        };
+        document.addEventListener('mousedown', handlePointerDown);
+        return () => document.removeEventListener('mousedown', handlePointerDown);
+    }, [accountMenuOpen]);
     const [mainView, setMainView] = useState<MainView>('main');
     const [loginForm, setLoginForm] = useState({ email: '', password: '' });
     const [registerForm, setRegisterForm] = useState({ fullName: '', email: '', password: '', confirmPassword: '' });
@@ -438,8 +472,8 @@ export default function Home() {
                     params.set('amenityIds', selectedAmenities.join(','));
                 }
 
-                if (debouncedSearchTerm.trim()) {
-                    params.set('search', debouncedSearchTerm.trim());
+                if (searchTerm.trim()) {
+                    params.set('search', searchTerm.trim());
                 }
 
                 const res = await fetch(`/api/stores?${params.toString()}`);
@@ -467,10 +501,10 @@ export default function Home() {
         }
 
         fetchStores();
-    }, [userLocation, radius, selectedBrand, selectedAmenities, openOnly, debouncedSearchTerm, sortBy, minRating, storesRetryKey]);
+    }, [userLocation, radius, selectedBrand, selectedAmenities, openOnly, searchTerm, sortBy, minRating, storesRetryKey]);
 
     const toggleAmenity = (amenityId: string) => {
-        setSelectedAmenities((current) =>
+        setDraftSelectedAmenities((current) =>
             current.includes(amenityId)
                 ? current.filter((id) => id !== amenityId)
                 : [...current, amenityId]
@@ -1141,7 +1175,7 @@ export default function Home() {
                     </button>
                     <div className="relative">
                     {currentUser ? (
-                        <div className="relative">
+                        <div className="relative" ref={accountMenuRef}>
                             <button
                                 type="button"
                                 onClick={() => setAccountMenuOpen((prev) => !prev)}
@@ -1657,8 +1691,8 @@ export default function Home() {
                     <div>
                         <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Tìm kiếm</label>
                         <input
-                            value={searchTerm}
-                            onChange={(e) => handleSearchChange(e.target.value)}
+                            value={draftSearchTerm}
+                            onChange={(e) => setDraftSearchTerm(e.target.value)}
                             placeholder="Tên cửa hàng hoặc địa chỉ"
                             className="w-full border border-gray-200 dark:border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-800 dark:text-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-200 dark:focus:ring-blue-800"
                         />
@@ -1667,8 +1701,8 @@ export default function Home() {
                     <div>
                         <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Bán kính</label>
                         <select
-                            value={radius}
-                            onChange={(e) => setRadius(Number(e.target.value))}
+                            value={draftRadius}
+                            onChange={(e) => setDraftRadius(Number(e.target.value))}
                             className="w-full border border-gray-200 dark:border-gray-700 rounded-lg px-3 py-2 text-sm bg-white dark:bg-gray-900 text-gray-800 dark:text-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-200 dark:focus:ring-blue-800"
                         >
                             <option value={300}>300 m</option>
@@ -1682,8 +1716,8 @@ export default function Home() {
                     <div>
                         <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Thương hiệu</label>
                         <select
-                            value={selectedBrand}
-                            onChange={(e) => setSelectedBrand(e.target.value)}
+                            value={draftSelectedBrand}
+                            onChange={(e) => setDraftSelectedBrand(e.target.value)}
                             className="w-full border border-gray-200 dark:border-gray-700 rounded-lg px-3 py-2 text-sm bg-white dark:bg-gray-900 text-gray-800 dark:text-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-200 dark:focus:ring-blue-800"
                         >
                             {brandOptions.map((brand) => (
@@ -1697,8 +1731,8 @@ export default function Home() {
                     <div>
                         <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Sắp xếp</label>
                         <select
-                            value={sortBy}
-                            onChange={(e) => setSortBy(e.target.value as 'nearest' | 'rating')}
+                            value={draftSortBy}
+                            onChange={(e) => setDraftSortBy(e.target.value as 'nearest' | 'rating')}
                             className="w-full border border-gray-200 dark:border-gray-700 rounded-lg px-3 py-2 text-sm bg-white dark:bg-gray-900 text-gray-800 dark:text-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-200 dark:focus:ring-blue-800"
                         >
                             <option value="nearest">Gần nhất trước</option>
@@ -1709,8 +1743,8 @@ export default function Home() {
                     <div>
                         <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Đánh giá tối thiểu</label>
                         <select
-                            value={minRating}
-                            onChange={(e) => setMinRating(Number(e.target.value))}
+                            value={draftMinRating}
+                            onChange={(e) => setDraftMinRating(Number(e.target.value))}
                             className="w-full border border-gray-200 dark:border-gray-700 rounded-lg px-3 py-2 text-sm bg-white dark:bg-gray-900 text-gray-800 dark:text-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-200 dark:focus:ring-blue-800"
                         >
                             <option value={0}>Mọi mức</option>
@@ -1723,7 +1757,7 @@ export default function Home() {
 
                 <div className="mt-3 flex flex-wrap items-center gap-2">
                     {catalogAmenities.map((amenity) => {
-                        const active = selectedAmenities.includes(amenity.id);
+                        const active = draftSelectedAmenities.includes(amenity.id);
                         return (
                             <button
                                 key={amenity.id}
@@ -1740,13 +1774,26 @@ export default function Home() {
                     })}
                     <button
                         type="button"
-                        onClick={() => setOpenOnly((prev) => !prev)}
-                        className={`rounded-full px-3 py-1.5 text-xs font-medium transition ${openOnly
+                        onClick={() => setDraftOpenOnly((prev) => !prev)}
+                        className={`rounded-full px-3 py-1.5 text-xs font-medium transition ${draftOpenOnly
                                 ? 'bg-emerald-600 text-white shadow-sm'
                                 : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700'
                             }`}
                     >
                         Chỉ đang mở
+                    </button>
+                </div>
+                <div className="mt-3">
+                    <button
+                        type="button"
+                        onClick={applyFilters}
+                        disabled={!hasPendingFilters}
+                        className={`w-full lg:w-auto rounded-xl px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition ${hasPendingFilters
+                                ? 'bg-blue-600 hover:bg-blue-700'
+                                : 'bg-gray-300 dark:bg-gray-700 cursor-not-allowed'
+                            }`}
+                    >
+                        Áp dụng bộ lọc
                     </button>
                 </div>
                 </div>
