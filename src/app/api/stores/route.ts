@@ -1,5 +1,5 @@
 ﻿import { NextResponse } from 'next/server';
-import { applyRoadDistances } from '@/lib/osrm';
+import { applyRoadDistancesTop } from '@/lib/osrm';
 import {
   applyRatingFilterAndSort,
   getStoreCatalog,
@@ -8,6 +8,10 @@ import {
   queryStores,
   queryStoresFromDatabase,
 } from '@/lib/store-db';
+
+// API trả tối đa bấy nhiêu cửa hàng sau khi sắp xếp — đủ cho UI,
+// tránh render hàng trăm thẻ khi DB có hàng nghìn cửa hàng.
+const MAX_STORE_RESULTS = 100;
 
 function parseArrayParam(value: string | null): string[] {
     if (!value) {
@@ -151,12 +155,13 @@ export async function GET(request: Request) {
                     { sort, minRating }
                 );
 
-                // Ghi đè khoảng cách đường chim bay bằng khoảng cách đường bộ (OSRM)
-                // rồi sắp xếp lại, cho khớp với số Google Maps báo khi bấm "Chỉ đường".
+                // Chỉ tính đường bộ cho 30 cửa hàng gần nhất (đường chim bay)
+                // để request OSRM nhẹ; rồi sắp xếp lại, cho khớp với số
+                // Google Maps báo khi bấm "Chỉ đường".
                 const googleStores = applyRatingFilterAndSort(
-                    await applyRoadDistances(stores, { lat, lng }),
+                    await applyRoadDistancesTop(stores, { lat, lng }),
                     { sort, minRating }
-                );
+                ).slice(0, MAX_STORE_RESULTS);
 
                 const googleCatalog = await getStoreCatalog();
                 return NextResponse.json({ stores: googleStores, brands: googleCatalog.brands, amenities: googleCatalog.amenities });
@@ -182,12 +187,13 @@ export async function GET(request: Request) {
     ]);
 
     if (dbCatalog && dbStores) {
-        // Ghi đè khoảng cách đường chim bay bằng khoảng cách đường bộ (OSRM)
-        // rồi sắp xếp lại. Lọc bán kính vẫn theo đường chim bay như trước.
+        // Chỉ tính đường bộ cho 30 cửa hàng gần nhất (đường chim bay) để
+        // request OSRM nhẹ rồi sắp xếp lại. Lọc bán kính vẫn theo đường
+        // chim bay như trước. API trả tối đa 100 cửa hàng.
         const roadStores = applyRatingFilterAndSort(
-            await applyRoadDistances(dbStores, { lat, lng }),
+            await applyRoadDistancesTop(dbStores, { lat, lng }),
             { sort, minRating }
-        );
+        ).slice(0, MAX_STORE_RESULTS);
         return NextResponse.json({
             stores: roadStores,
             brands: dbCatalog.brands,
@@ -209,9 +215,9 @@ export async function GET(request: Request) {
 
     const { brands, amenities } = await getStoreCatalog();
     const roadMockStores = applyRatingFilterAndSort(
-        await applyRoadDistances(mockStores, { lat, lng }),
+        await applyRoadDistancesTop(mockStores, { lat, lng }),
         { sort, minRating }
-    );
+    ).slice(0, MAX_STORE_RESULTS);
 
     return NextResponse.json({
         stores: roadMockStores,

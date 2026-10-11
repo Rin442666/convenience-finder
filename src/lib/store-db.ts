@@ -227,6 +227,43 @@ export async function getUserRating(storeId: string, userId: string): Promise<nu
   return review ? review.rating : null;
 }
 
+// Tổng hợp đánh giá cho NHIỀU cửa hàng trong 1 query duy nhất —
+// tránh N+1 query khi danh sách có hàng trăm cửa hàng.
+async function getReviewAggregates(
+  storeIds: string[]
+): Promise<Map<string, { total: number; cnt: number }>> {
+  const map = new Map<string, { total: number; cnt: number }>();
+  if (storeIds.length === 0) {
+    return map;
+  }
+  // Chia chunk để không vượt giới hạn số params (SQLite ~999).
+  const CHUNK = 500;
+  for (let i = 0; i < storeIds.length; i += CHUNK) {
+    const chunk = storeIds.slice(i, i + CHUNK);
+    const placeholders = chunk.map(() => '?').join(',');
+    const rows = await dbAll<{ store_id: string; total: number; cnt: number }>(
+      `SELECT store_id, COALESCE(SUM(rating), 0) AS total, COUNT(*) AS cnt
+       FROM reviews WHERE store_id IN (${placeholders}) GROUP BY store_id`,
+      chunk
+    );
+    for (const row of rows) {
+      map.set(row.store_id, { total: Number(row.total) || 0, cnt: Number(row.cnt) || 0 });
+    }
+  }
+  return map;
+}
+
+function liveRatingFromAggregate(
+  baseRating: number,
+  agg: { total: number; cnt: number } | undefined
+): { rating: number; ratingCount: number } {
+  const userVotes = agg?.cnt || 0;
+  const userTotal = agg?.total || 0;
+  const count = SEED_RATING_VOTES + userVotes;
+  const rating = round1((baseRating * SEED_RATING_VOTES + userTotal) / count);
+  return { rating, ratingCount: count };
+}
+
 // Đánh giá (sao + bình luận) của chính user cho cửa hàng.
 export async function getUserReview(
   storeId: string,
@@ -384,22 +421,23 @@ async function enrichAndFilterStores(rows: StoreRow[], filters: StoreFilters): P
   const amenityMap = await getAmenitiesByStore(rows.map((row) => row.id));
   const normalizedSearch = search.trim().toLowerCase();
 
-  const enriched = await Promise.all(
-    rows.map(async (row) => {
-      const base: StoreRecord = toStoreRecord(row, amenityMap.get(row.id) || []);
-      // Ghi đè rating tĩnh bằng rating trực tiếp (đã gồm đánh giá của user).
-      const live = await getLiveRating(base.id, base.rating);
-      const enrichedStore: EnrichedStore = {
-        ...base,
-        rating: live.rating,
-        ratingCount: live.ratingCount,
-        // Ưu tiên giờ mở cửa thực tế thay vì dữ liệu tĩnh có thể đã cũ.
-        isOpen: computeIsOpenNow(base),
-        distanceMeters: haversineDistanceMeters(lat, lng, base.lat, base.lng),
-      };
-      return enrichedStore;
-    })
-  );
+  // Gộp toàn bộ đánh giá trong 1 query (tránh N+1 khi có hàng trăm cửa hàng).
+  const voteMap = await getReviewAggregates(rows.map((row) => row.id));
+
+  const enriched = rows.map((row) => {
+    const base: StoreRecord = toStoreRecord(row, amenityMap.get(row.id) || []);
+    // Ghi đè rating tĩnh bằng rating trực tiếp (đã gồm đánh giá của user).
+    const live = liveRatingFromAggregate(base.rating, voteMap.get(base.id));
+    const enrichedStore: EnrichedStore = {
+      ...base,
+      rating: live.rating,
+      ratingCount: live.ratingCount,
+      // Ưu tiên giờ mở cửa thực tế thay vì dữ liệu tĩnh có thể đã cũ.
+      isOpen: computeIsOpenNow(base),
+      distanceMeters: haversineDistanceMeters(lat, lng, base.lat, base.lng),
+    };
+    return enrichedStore;
+  });
 
   const filtered = enriched.filter((store) => {
     const withinRadius = store.distanceMeters <= radius;

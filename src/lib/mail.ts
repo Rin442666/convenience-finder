@@ -47,3 +47,20 @@ export async function sendPasswordResetEmail(to: string, resetUrl: string): Prom
       `<p>Nếu bạn không yêu cầu, hãy bỏ qua email này.</p>`,
   });
 }
+
+export async function sendPasswordChangeConfirmEmail(to: string, confirmUrl: string): Promise<void> {
+  const from = process.env.EMAIL_USER as string;
+  await getTransporter().sendMail({
+    from: `"ConvenienceFinder" <${from}>`,
+    to,
+    subject: 'Xác nhận đổi mật khẩu — ConvenienceFinder',
+    text:
+      `Bạn đã yêu cầu đổi mật khẩu cho tài khoản ConvenienceFinder.\n\n` +
+      `Bấm vào link sau để xác nhận (hết hạn sau 15 phút):\n${confirmUrl}\n\n` +
+      `Nếu bạn không yêu cầu, hãy bỏ qua email này — mật khẩu của bạn sẽ không thay đổi.`,
+    html:
+      `<p>Bạn đã yêu cầu đổi mật khẩu cho tài khoản ConvenienceFinder.</p>` +
+      `<p><a href="${confirmUrl}">Bấm vào đây để xác nhận đổi mật khẩu</a> (link hết hạn sau 15 phút).</p>` +
+      `<p>Nếu bạn không yêu cầu, hãy bỏ qua email này — mật khẩu của bạn sẽ không thay đổi.</p>`,
+  });
+}

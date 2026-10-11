@@ -1,6 +1,9 @@
 import type { Metadata } from "next";
 import { Be_Vietnam_Pro } from "next/font/google";
 import "./globals.css";
+import { AppProvider } from "@/components/app-provider";
+import SiteHeader from "@/components/SiteHeader";
+import ToastHost from "@/components/Toast";
 
 // Be Vietnam Pro hỗ trợ đầy đủ ký tự tiếng Việt (trước đây dùng Geist
 // nhưng quên gắn vào body, lại chỉ load subset latin khiến chữ có dấu
@@ -34,7 +37,15 @@ export default function RootLayout({
             <head>
                 <script dangerouslySetInnerHTML={{ __html: darkModeInitScript }} />
             </head>
-            <body className={beVietnamPro.className} suppressHydrationWarning>{children}</body>
+            <body className={beVietnamPro.className} suppressHydrationWarning>
+                <AppProvider>
+                    <main className="min-h-screen bg-gray-50 dark:bg-gray-950 p-6">
+                        <SiteHeader />
+                        {children}
+                    </main>
+                    <ToastHost />
+                </AppProvider>
+            </body>
         </html>
     );
 }

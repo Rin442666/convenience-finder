@@ -81,3 +81,9 @@ body {
 .dark .leaflet-popup-tip {
     background-color: #1f2937;
 }
+
+@layer base {
+    input, textarea {
+        @apply text-gray-900 dark:text-gray-100;
+    }
+}

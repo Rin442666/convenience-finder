@@ -4,14 +4,14 @@ import { createSessionToken, loginServerUser, toPublicUser } from '@/lib/server-
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const email = String(body?.email || '').trim();
+    const identifier = String(body?.email || body?.identifier || '').trim();
     const password = String(body?.password || '');
 
-    const result = await loginServerUser(email, password);
+    const result = await loginServerUser(identifier, password);
 
     if (!result) {
       return NextResponse.json(
-        { message: 'Email hoặc mật khẩu không đúng.' },
+        { message: 'Username/email hoặc mật khẩu không đúng.' },
         { status: 401 }
       );
     }

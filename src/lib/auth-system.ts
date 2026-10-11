@@ -13,6 +13,7 @@ export type AppUser = {
   id: string;
   fullName: string;
   email: string;
+  username: string | null;
   password: string;
   role: UserRole;
   permissions: Permission[];

@@ -5,6 +5,7 @@ import { AppUser, Permission, UserRole, hasPermission, permissionByRole } from '
 import { dbAll, dbGet, dbRun } from './db';
 
 const TOKEN_TTL_MS = 7 * 24 * 60 * 60 * 1000; // token sống 7 ngày
+const CHANGE_TTL_MS = 15 * 60 * 1000; // link xác nhận đổi mật khẩu sống 15 phút
 
 function getSecret(): string {
   const secret = process.env.AUTH_SECRET;
@@ -125,6 +126,7 @@ type UserRow = {
   id: string;
   full_name: string;
   email: string;
+  username: string | null;
   password_hash: string;
   role: string;
   is_active: number;
@@ -136,6 +138,7 @@ function rowToAppUser(row: UserRow): AppUser {
     id: row.id,
     fullName: row.full_name,
     email: row.email,
+    username: row.username,
     password: row.password_hash,
     role,
     permissions: [...permissionByRole[role]],
@@ -154,11 +157,30 @@ export async function findServerUserByEmail(email: string): Promise<AppUser | un
   return row ? rowToAppUser(row) : undefined;
 }
 
+/** Tìm user theo email HOẶC username (đăng nhập dùng 1 ô duy nhất). */
+export async function findServerUserByIdentifier(identifier: string): Promise<AppUser | undefined> {
+  const normalized = identifier.trim().toLowerCase();
+  const row = await dbGet<UserRow>(
+    'SELECT * FROM users WHERE lower(email) = ? OR lower(username) = ?',
+    [normalized, normalized]
+  );
+  return row ? rowToAppUser(row) : undefined;
+}
+
+export async function findServerUserByUsername(username: string): Promise<AppUser | undefined> {
+  const normalized = username.trim().toLowerCase();
+  const row = await dbGet<UserRow>('SELECT * FROM users WHERE lower(username) = ?', [normalized]);
+  return row ? rowToAppUser(row) : undefined;
+}
+
+export const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+export const USERNAME_RE = /^[a-zA-Z0-9._-]{3,30}$/;
+
 export async function loginServerUser(
-  email: string,
+  identifier: string,
   password: string
 ): Promise<AppUser | { locked: true } | null> {
-  const user = await findServerUserByEmail(email);
+  const user = await findServerUserByIdentifier(identifier);
   if (!user) {
     return null;
   }
@@ -174,33 +196,47 @@ export async function loginServerUser(
 export async function registerServerUser(
   fullName: string,
   email: string,
-  password: string
+  password: string,
+  username?: string
 ): Promise<AppUser | { error: string }> {
   const name = fullName.trim();
-  const mail = email.trim();
+  const mail = email.trim().toLowerCase();
+  const uname = (username || '').trim();
 
   if (!name || !mail || !password) {
     return { error: 'Vui lòng nhập đầy đủ thông tin tài khoản.' };
   }
+  if (!EMAIL_RE.test(mail)) {
+    return { error: 'Email không đúng định dạng.' };
+  }
   if (password.length < 6) {
     return { error: 'Mật khẩu phải có ít nhất 6 ký tự.' };
   }
+  if (uname) {
+    if (!USERNAME_RE.test(uname)) {
+      return { error: 'Username chỉ gồm chữ, số, dấu . _ -, từ 3 đến 30 ký tự.' };
+    }
+    if (await findServerUserByUsername(uname)) {
+      return { error: 'Username này đã được sử dụng.' };
+    }
+  }
   if (await findServerUserByEmail(mail)) {
-    return { error: 'Tài khoản này đã tồn tại trong hệ thống.' };
+    return { error: 'Email này đã được đăng ký.' };
   }
 
   const user: AppUser = {
     id: `user-${Date.now()}`,
     fullName: name,
     email: mail,
+    username: uname || null,
     password: hashPassword(password),
     role: 'user',
     permissions: [...permissionByRole.user],
     isActive: true,
   };
   await dbRun(
-    'INSERT INTO users (id, full_name, email, password_hash, role, is_active, created_at) VALUES (?, ?, ?, ?, ?, 1, ?)',
-    [user.id, user.fullName, user.email, user.password, user.role, new Date().toISOString()]
+    'INSERT INTO users (id, full_name, email, username, password_hash, role, is_active, created_at) VALUES (?, ?, ?, ?, ?, ?, 1, ?)',
+    [user.id, user.fullName, user.email, user.username, user.password, user.role, new Date().toISOString()]
   );
   return user;
 }
@@ -211,6 +247,7 @@ export function toPublicUser(user: AppUser): Omit<AppUser, 'password'> {
     id: user.id,
     fullName: user.fullName,
     email: user.email,
+    username: user.username,
     role: user.role,
     permissions: [...user.permissions],
     isActive: user.isActive,
@@ -263,9 +300,83 @@ export async function changeServerUserPassword(
   return rowToAppUser(row);
 }
 
+type ChangeTokenRow = {
+  id: string;
+  user_id: string;
+  expires_at: string;
+  used: number;
+  pending_password_hash: string | null;
+};
+
+/**
+ * Tạo yêu cầu đổi mật khẩu: kiểm tra mật khẩu hiện tại, lưu mật khẩu mới
+ * (dạng hash) chờ xác nhận qua email. Trả về token thô để gửi link.
+ */
+export async function createPasswordChangeRequest(
+  userId: string,
+  currentPassword: string,
+  newPassword: string
+): Promise<{ token: string; requestId: string } | { error: string }> {
+  if (newPassword.length < 6) {
+    return { error: 'Mật khẩu mới phải có ít nhất 6 ký tự.' };
+  }
+  if (currentPassword === newPassword) {
+    return { error: 'Mật khẩu mới phải khác mật khẩu hiện tại.' };
+  }
+  const row = await dbGet<UserRow>('SELECT * FROM users WHERE id = ?', [userId]);
+  if (!row || row.is_active !== 1) {
+    return { error: 'Không tìm thấy tài khoản.' };
+  }
+  if (!verifyPassword(currentPassword, row.password_hash)) {
+    return { error: 'Mật khẩu hiện tại không đúng.' };
+  }
+  if (!EMAIL_RE.test(row.email)) {
+    return { error: 'Tài khoản chưa có email hợp lệ, không thể xác nhận qua mail.' };
+  }
+  const token = crypto.randomBytes(32).toString('hex');
+  const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
+  const expiresAt = new Date(Date.now() + CHANGE_TTL_MS).toISOString();
+  const id = `pch-${Date.now().toString(36)}${crypto.randomBytes(4).toString('hex')}`;
+  await dbRun(
+    `INSERT INTO password_resets (id, user_id, token_hash, expires_at, pending_password_hash) VALUES (?, ?, ?, ?, ?)`,
+    [id, row.id, tokenHash, expiresAt, hashPassword(newPassword)]
+  );
+  return { token, requestId: id };
+}
+
+/** Xác nhận đổi mật khẩu bằng token trong email — áp dụng mật khẩu đã chờ. */
+export async function confirmPasswordChange(
+  token: string
+): Promise<{ ok: true } | { error: string }> {
+  const clean = token.trim();
+  if (!clean) {
+    return { error: 'Thiếu token xác nhận.' };
+  }
+  const tokenHash = crypto.createHash('sha256').update(clean).digest('hex');
+  const row = await dbGet<ChangeTokenRow>(
+    `SELECT id, user_id, expires_at, used, pending_password_hash FROM password_resets WHERE token_hash = ?`,
+    [tokenHash]
+  );
+  if (!row || row.used || !row.pending_password_hash) {
+    return { error: 'Link xác nhận không hợp lệ hoặc đã được dùng.' };
+  }
+  if (row.expires_at <= new Date().toISOString()) {
+    return { error: 'Link xác nhận đã hết hạn. Vui lòng yêu cầu lại.' };
+  }
+  const user = await dbGet<UserRow>('SELECT * FROM users WHERE id = ?', [row.user_id]);
+  if (!user || user.is_active !== 1) {
+    return { error: 'Tài khoản không tồn tại.' };
+  }
+  await dbRun(`UPDATE users SET password_hash = ? WHERE id = ?`, [
+    row.pending_password_hash,
+    user.id,
+  ]);
+  await dbRun(`UPDATE password_resets SET used = 1 WHERE id = ?`, [row.id]);
+  return { ok: true };
+}
+
 /** Thông tin user cho trang admin — KHÔNG bao giờ gồm password. */
 export type AdminUserItem = Omit<AppUser, 'password'> & { createdAt: string };
-
 type UserRowWithCreated = UserRow & { created_at: string };
 
 /**

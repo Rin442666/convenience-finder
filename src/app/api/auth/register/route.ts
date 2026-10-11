@@ -8,7 +8,8 @@ export async function POST(request: Request) {
     const result = await registerServerUser(
       String(body?.fullName || ''),
       String(body?.email || ''),
-      String(body?.password || '')
+      String(body?.password || ''),
+      String(body?.username || '')
     );
 
     if ('error' in result) {

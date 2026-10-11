@@ -7,7 +7,10 @@ export type LatLng = { lat: number; lng: number };
 const OSRM_TABLE_URL = 'https://router.project-osrm.org/table/v1/driving';
 // OSRM demo server miễn phí nhưng giới hạn ~100 tọa độ/request.
 const MAX_COORDS_PER_REQUEST = 99;
-const REQUEST_TIMEOUT_MS = 5000;
+// Chỉ tính đường bộ cho N cửa hàng gần nhất (theo đường chim bay) —
+// request nhỏ thì OSRM trả nhanh, không phải chờ ma trận 100x100.
+export const ROAD_TOP_N = 30;
+const REQUEST_TIMEOUT_MS = 3000;
 const CACHE_TTL_MS = 120_000;
 const CACHE_MAX_ENTRIES = 50;
 
@@ -79,21 +82,37 @@ export async function getRoadDistances(
 }
 
 /**
- * Ghi đè distanceMeters của từng cửa hàng bằng khoảng cách đường bộ (nếu lấy được).
- * KHÔNG lọc theo bán kính ở đây — lọc bán kính vẫn dùng đường chim bay như trước
- * (khớp với vòng tròn bán kính trên bản đồ); chỉ số hiển thị/sắp xếp là đường bộ.
+ * Ghi đè distanceMeters bằng khoảng cách đường bộ cho N cửa hàng gần nhất
+ * (theo đường chim bay); các cửa hàng còn lại giữ nguyên số chim bay.
+ * Trả về đúng thứ tự đầu vào — caller tự sắp xếp lại sau.
+ * KHÔNG lọc theo bán kính ở đây (giữ nguyên quy tắc patch-30).
  */
-export async function applyRoadDistances<T extends LatLng & { distanceMeters?: number }>(
+export async function applyRoadDistancesTop<T extends LatLng & { distanceMeters?: number }>(
   stores: T[],
-  origin: LatLng
+  origin: LatLng,
+  topN: number = ROAD_TOP_N
 ): Promise<T[]> {
   if (stores.length === 0) {
     return stores;
   }
-  const roads = await getRoadDistances(origin, stores);
+  // Chỉ số sắp theo khoảng cách chim bay tăng dần.
+  const order = stores
+    .map((_, i) => i)
+    .sort((a, b) => (stores[a].distanceMeters ?? 0) - (stores[b].distanceMeters ?? 0));
+  const topIdx = order.slice(0, topN);
+  const roads = await getRoadDistances(
+    origin,
+    topIdx.map((i) => stores[i])
+  );
+  const roadByIndex = new Map<number, number>();
+  topIdx.forEach((origIdx, k) => {
+    const road = roads[k];
+    if (typeof road === 'number') {
+      roadByIndex.set(origIdx, road);
+    }
+  });
   return stores.map((store, i) => {
-    const road = roads[i];
-    const base = store.distanceMeters ?? 0;
-    return { ...store, distanceMeters: typeof road === 'number' ? road : base };
+    const road = roadByIndex.get(i);
+    return road === undefined ? store : { ...store, distanceMeters: road };
   });
 }

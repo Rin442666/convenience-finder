@@ -210,6 +210,16 @@ async function runMigrations(): Promise<void> {
       created_at TEXT NOT NULL DEFAULT (now()::text)
     )`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_password_resets_token ON password_resets (token_hash)`);
+    // Đổi mật khẩu qua mail xác nhận cần cột username + mật khẩu chờ xác nhận.
+    // (SQLite/Postgres đều không thêm UNIQUE trực tiếp qua ADD COLUMN một cách
+    // an toàn nên tạo UNIQUE INDEX riêng sau khi backfill.)
+    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS username TEXT`);
+    await pool.query(
+      `ALTER TABLE password_resets ADD COLUMN IF NOT EXISTS pending_password_hash TEXT`
+    );
+    // User cũ: username mặc định lấy từ giá trị email đang lưu.
+    await pool.query(`UPDATE users SET username = email WHERE username IS NULL`);
+    await pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username ON users (username)`);
     return;
   }
   // SQLite không có ADD COLUMN IF NOT EXISTS -> kiểm tra qua PRAGMA.
@@ -231,6 +241,19 @@ async function runMigrations(): Promise<void> {
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     )`);
     db.exec(`CREATE INDEX idx_password_resets_token ON password_resets (token_hash)`);
+  }
+  // SQLite: thêm cột username cho users (tài khoản cũ lấy username từ email đang lưu),
+  // thêm cột pending_password_hash cho password_resets (đổi mật khẩu qua mail xác nhận).
+  // Lưu ý: SQLite không cho ADD COLUMN kèm UNIQUE -> tạo UNIQUE INDEX riêng.
+  const userCols = db.prepare(`PRAGMA table_info(users)`).all() as { name: string }[];
+  if (!userCols.some((col) => col.name === 'username')) {
+    db.exec(`ALTER TABLE users ADD COLUMN username TEXT`);
+    db.exec(`UPDATE users SET username = email WHERE username IS NULL`);
+    db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username ON users (username)`);
+  }
+  const resetCols = db.prepare(`PRAGMA table_info(password_resets)`).all() as { name: string }[];
+  if (!resetCols.some((col) => col.name === 'pending_password_hash')) {
+    db.exec(`ALTER TABLE password_resets ADD COLUMN pending_password_hash TEXT`);
   }
 }
 
