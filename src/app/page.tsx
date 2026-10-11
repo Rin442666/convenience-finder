@@ -724,9 +724,9 @@ export default function Home() {
                     </div>
 
                     {isLoadingStores && !pickingLocation && (
-                         <div className="pointer-events-none absolute left-1/2 top-4 z-10 flex -translate-x-1/2 items-center gap-2 rounded-full bg-slate-900/85 px-4 py-1.5 text-xs font-medium text-white shadow-md">
+                         <div className="pointer-events-none fixed left-1/2 top-5 z-30 flex -translate-x-1/2 items-center gap-2 rounded-full bg-slate-900/85 px-4 py-1.5 text-xs font-medium text-white shadow-md">
                              <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/30 border-t-white" aria-hidden="true" />
-                             Đang cập nhật bản đồ...
+                             Đang cập nhật ...
                          </div>
                 )}
 
