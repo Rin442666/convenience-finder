@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { MapPin, Menu, Moon, Sun, User } from 'lucide-react';
+import { Menu, Moon, Sun, User } from 'lucide-react';
 import { useApp } from '@/components/app-provider';
 import AuthModal from '@/components/AuthModal';
 import { useEscapeKey } from '@/lib/use-escape';
@@ -56,7 +56,7 @@ export default function SiteHeader() {
             <div className="max-w-7xl mx-auto mb-6 flex justify-between items-center gap-4 flex-wrap">
                 <div>
                     <Link href="/" className="flex items-center gap-2">
-                        <MapPin className="h-8 w-8 text-blue-600 dark:text-blue-400" />
+                        <img src="/logo.png" alt="ConvenienceFinder" className="h-9 w-9 rounded-xl" />
                         <h1 className="text-2xl sm:text-3xl font-extrabold text-blue-600 dark:text-blue-400">
                             ConvenienceFinder
                         </h1>
