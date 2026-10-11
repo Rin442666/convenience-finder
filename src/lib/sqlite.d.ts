@@ -1,5 +1,5 @@
-// Khai báo tối thiểu cho node:sqlite (có sẵn từ Node 22.5+).
-// @types/node hiện tại chưa gồm module này nên khai báo thủ công để tsc qua được.
+/* Khai báo tối thiểu cho node:sqlite (có sẵn từ Node 22.5+).
+   @types/node hiện tại chưa gồm module này nên khai báo thủ công để tsc qua được. */
 declare module 'node:sqlite' {
   export type SQLInputValue = null | number | bigint | string | NodeJS.ArrayBufferView;
   export interface StatementSync {

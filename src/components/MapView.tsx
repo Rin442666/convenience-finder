@@ -8,14 +8,12 @@ interface MapViewProps {
   stores: Store[];
   selectedStore?: Store | null;
   onMapMoveEnd?: (newCenter: UserLocation) => void;
-  // Chế độ "chọn vị trí trên bản đồ": khi bật, click vào bản đồ sẽ gọi
-  // onMapClick thay vì chỉ kéo thả xem bản đồ.
   pickingEnabled?: boolean;
   onMapClick?: (location: UserLocation) => void;
 }
 
-// Escape HTML để chống XSS khi tên/địa chỉ cửa hàng chứa ký tự đặc biệt
-// (dữ liệu có thể đến từ yêu cầu do người dùng gửi lên).
+/* Escape HTML để chống XSS khi tên/địa chỉ cửa hàng chứa ký tự đặc biệt
+   (dữ liệu có thể đến từ yêu cầu do người dùng gửi lên). */
 function escapeHtml(value: string): string {
   return value
     .replace(/&/g, '&amp;')
@@ -30,14 +28,13 @@ export default function MapView({ center, stores, selectedStore, onMapMoveEnd, p
   const mapInstanceRef = useRef<any>(null);
   const routeLayerRef = useRef<any>(null);
   const markersGroupRef = useRef<any>(null);
-  // Ghi nhớ view trước đó để không reset góc nhìn khi chỉ đổi filter.
   const prevCenterRef = useRef<UserLocation | null>(null);
   const prevSelectedIdRef = useRef<string | null>(null);
   // Đánh số request vẽ đường đi để response cũ không ghi đè (race condition).
   const routeRequestIdRef = useRef<number>(0);
-  // Ref cho callback chọn vị trí: bản đồ chỉ tạo 1 lần nên dùng ref để luôn
-  // gọi callback mới nhất mà không cần khởi tạo lại map. Gán trong effect
-  // (không gán trực tiếp lúc render) để đúng quy tắc react-hooks/refs.
+  /* Ref cho callback chọn vị trí: bản đồ chỉ tạo 1 lần nên dùng ref để luôn
+     gọi callback mới nhất mà không cần khởi tạo lại map. Gán trong effect
+     (không gán trực tiếp lúc render) để đúng quy tắc react-hooks/refs. */
   const pickingEnabledRef = useRef(pickingEnabled);
   const onMapClickRef = useRef(onMapClick);
   useEffect(() => {
@@ -58,8 +55,6 @@ export default function MapView({ center, stores, selectedStore, onMapMoveEnd, p
       if (!window.L || !mapContainerRef.current) return;
 
       if (!mapInstanceRef.current) {
-        // Tắt attribution control trên bản đồ vì credit OpenStreetMap đã có
-        // ở footer cuối trang.
         const map = window.L.map(mapContainerRef.current, { attributionControl: false }).setView([center.lat, center.lng], 14);
 
         window.L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -73,7 +68,6 @@ export default function MapView({ center, stores, selectedStore, onMapMoveEnd, p
           }
         });
 
-        // Click bản đồ để chọn vị trí tìm kiếm (chỉ khi đang bật chế độ chọn).
         map.on('click', (event: { latlng: { lat: number; lng: number } }) => {
           if (pickingEnabledRef.current && onMapClickRef.current) {
             onMapClickRef.current({ lat: event.latlng.lat, lng: event.latlng.lng });
@@ -85,13 +79,10 @@ export default function MapView({ center, stores, selectedStore, onMapMoveEnd, p
 
       const map = mapInstanceRef.current;
 
-      // Đổi con trỏ chuột khi đang ở chế độ chọn vị trí.
       if (mapContainerRef.current) {
         mapContainerRef.current.style.cursor = pickingEnabledRef.current ? 'crosshair' : '';
       }
 
-      // Chỉ reset góc nhìn khi vị trí trung tâm thật sự đổi (GPS mới),
-      // không reset khi người dùng chỉ đổi filter/tìm kiếm.
       const centerChanged =
         !prevCenterRef.current ||
         prevCenterRef.current.lat !== center.lat ||
@@ -101,7 +92,6 @@ export default function MapView({ center, stores, selectedStore, onMapMoveEnd, p
       prevCenterRef.current = { lat: center.lat, lng: center.lng };
       prevSelectedIdRef.current = selectedId;
 
-      // Xóa ghim cũ khi re-render
       if (markersGroupRef.current) {
         map.removeLayer(markersGroupRef.current);
       }
@@ -142,7 +132,6 @@ export default function MapView({ center, stores, selectedStore, onMapMoveEnd, p
         }
       });
 
-      // Xóa tuyến đường cũ nếu có
       if (routeLayerRef.current) {
         map.removeLayer(routeLayerRef.current);
         routeLayerRef.current = null;
@@ -169,8 +158,6 @@ export default function MapView({ center, stores, selectedStore, onMapMoveEnd, p
           opacity: 0.8,
         }).addTo(map);
 
-        // Chỉ fit bounds khi vừa chọn cửa hàng hoặc vị trí đổi;
-        // đổi filter thì giữ nguyên góc nhìn người dùng đang xem.
         if (!fitBoundsToRoute) {
           return;
         }

@@ -1,6 +1,5 @@
-// Session phía client: đọc/ghi localStorage. Dùng chung cho mọi trang.
-// Session chỉ gồm token + thông tin công khai của user,
-// KHÔNG bao giờ chứa password.
+/* Session chỉ gồm token + thông tin công khai của user,
+   KHÔNG bao giờ chứa password. */
 import { AppUser } from '@/lib/auth-system';
 
 export const STORAGE_SESSION_KEY = 'finder_session';
@@ -44,7 +43,6 @@ export function persistSession(session: SessionData | null) {
     window.localStorage.setItem(STORAGE_SESSION_KEY, JSON.stringify(session));
 }
 
-// Dọn dữ liệu của phiên bản cũ (từng lưu cả password trong localStorage).
 export function clearLegacyAuthData() {
     if (typeof window === 'undefined') {
         return;

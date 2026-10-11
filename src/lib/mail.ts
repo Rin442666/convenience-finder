@@ -1,10 +1,10 @@
-// Gửi email qua Gmail SMTP (nodemailer). Module này chỉ được import từ
-// API routes, không bao giờ import từ client component.
-//
-// Cần 2 biến môi trường:
-//   EMAIL_USER — địa chỉ Gmail gửi đi
-//   EMAIL_PASS — App Password 16 ký tự (Google Account → Bảo mật →
-//                Mật khẩu ứng dụng), KHÔNG phải mật khẩu Gmail thường.
+/* Gửi email qua Gmail SMTP (nodemailer). Module này chỉ được import từ
+   API routes, không bao giờ import từ client component.
+
+   Cần 2 biến môi trường:
+     EMAIL_USER — địa chỉ Gmail gửi đi
+     EMAIL_PASS — App Password 16 ký tự (Google Account → Bảo mật →
+                  Mật khẩu ứng dụng), KHÔNG phải mật khẩu Gmail thường. */
 import nodemailer from 'nodemailer';
 
 let transporter: nodemailer.Transporter | null = null;

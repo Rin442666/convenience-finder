@@ -1,7 +1,7 @@
-// Tầng dữ liệu cửa hàng — dual-mode SQLite/Postgres qua src/lib/db.ts.
-// Không cần cài SQL Server. Chế độ suy ra từ DATABASE_URL.
-//
-// Lưu ý: module này chỉ dùng ở phía server (API routes).
+/* Tầng dữ liệu cửa hàng — dual-mode SQLite/Postgres qua src/lib/db.ts.
+   Không cần cài SQL Server. Chế độ suy ra từ DATABASE_URL.
+
+   Lưu ý: module này chỉ dùng ở phía server (API routes). */
 import { dbAll, dbGet, dbRun } from './db';
 
 export type Brand = {
@@ -40,15 +40,10 @@ export type StoreFilters = {
   amenityIds?: string[];
   openOnly?: boolean;
   search?: string;
-  // Sắp xếp: 'nearest' (mặc định) hoặc 'rating' (đánh giá cao nhất trước).
   sort?: 'nearest' | 'rating';
-  // Lọc đánh giá tối thiểu, ví dụ 4.0. Cửa hàng chưa có đánh giá (0) bị loại
-  // khi minRating > 0.
   minRating?: number;
 };
 
-// Danh sách tham chiếu tĩnh (dùng khi cần map tên thương hiệu, ví dụ lúc
-// admin duyệt request). Dữ liệu chuẩn nằm trong DB (db/seed.sql).
 export const brands: Brand[] = [
   { id: 'circle-k', name: 'Circle K' },
   { id: 'winmart', name: 'WinMart+' },
@@ -72,7 +67,6 @@ export const defaultLocation = {
   lng: 105.80266,
 };
 
-// Múi giờ dùng để tính giờ mở cửa của cửa hàng (dữ liệu ở Việt Nam).
 export const STORE_TIMEZONE = 'Asia/Ho_Chi_Minh';
 
 // Lấy số phút từ 0h theo giờ Việt Nam, bất kể server đang chạy ở múi giờ nào.
@@ -86,15 +80,11 @@ function getMinutesInStoreTimezone(now: Date = new Date()): number {
     const hour = Number(parts.find((part) => part.type === 'hour')?.value ?? '0');
     const minute = Number(parts.find((part) => part.type === 'minute')?.value ?? '0');
     if (!Number.isFinite(hour) || !Number.isFinite(minute)) {
-        // Fallback về giờ local của server nếu Intl không hỗ trợ timezone.
         return now.getHours() * 60 + now.getMinutes();
     }
     return hour * 60 + minute;
 }
 
-// Tính trạng thái mở/đóng theo giờ Việt Nam hiện tại từ chuỗi openHours
-// ("06:00-23:00"). Xử lý cả khung giờ qua đêm ("22:00-06:00"). Nếu không
-// parse được giờ thì giữ nguyên giá trị isOpen có sẵn.
 export function computeIsOpenNow(store: { isOpen: boolean; is24h: boolean; openHours?: string }, now?: Date): boolean {
     if (store.is24h) {
         return true;
@@ -115,7 +105,6 @@ export function computeIsOpenNow(store: { isOpen: boolean; is24h: boolean; openH
     if (closeMinutes > openMinutes) {
         return nowMinutes >= openMinutes && nowMinutes < closeMinutes;
     }
-    // Khung giờ qua đêm, ví dụ 22:00-06:00.
     return nowMinutes >= openMinutes || nowMinutes < closeMinutes;
 }
 
@@ -131,8 +120,6 @@ export function haversineDistanceMeters(lat1: number, lng1: number, lat2: number
   return earthRadius * c;
 }
 
-// Lọc theo đánh giá tối thiểu + sắp xếp kết quả. Dùng chung cho cả DB
-// và Google Places để các nguồn cho kết quả nhất quán.
 export function applyRatingFilterAndSort<T extends { rating: number; distanceMeters?: number }>(
   stores: T[],
   filters: { sort?: 'nearest' | 'rating'; minRating?: number }
@@ -154,10 +141,10 @@ function round1(value: number): number {
   return Math.round(value * 10) / 10;
 }
 
-// --- Đánh giá sao (lưu trong bảng reviews) ---
-// Mỗi cửa hàng có điểm gốc (base_rating từ seed) + SEED_RATING_VOTES lượt "đệm"
-// để 1-2 đánh giá mới không làm trung bình nhảy loạn — giữ nguyên cách tính
-// của bản in-memory trước đây.
+/* --- Đánh giá sao (lưu trong bảng reviews) ---
+   Mỗi cửa hàng có điểm gốc (base_rating từ seed) + SEED_RATING_VOTES lượt "đệm"
+   để 1-2 đánh giá mới không làm trung bình nhảy loạn — giữ nguyên cách tính
+   của bản in-memory trước đây. */
 const SEED_RATING_VOTES = 20;
 
 type StoreRow = {
@@ -206,7 +193,6 @@ function toStoreRecord(row: StoreRow, amenities: string[]): StoreRecord {
   };
 }
 
-// Rating "trực tiếp": điểm gốc + đánh giá của user trong bảng reviews.
 export async function getLiveRating(
   storeId: string,
   baseRating: number
@@ -227,8 +213,8 @@ export async function getUserRating(storeId: string, userId: string): Promise<nu
   return review ? review.rating : null;
 }
 
-// Tổng hợp đánh giá cho NHIỀU cửa hàng trong 1 query duy nhất —
-// tránh N+1 query khi danh sách có hàng trăm cửa hàng.
+/* Tổng hợp đánh giá cho NHIỀU cửa hàng trong 1 query duy nhất —
+   tránh N+1 query khi danh sách có hàng trăm cửa hàng. */
 async function getReviewAggregates(
   storeIds: string[]
 ): Promise<Map<string, { total: number; cnt: number }>> {
@@ -264,7 +250,6 @@ function liveRatingFromAggregate(
   return { rating, ratingCount: count };
 }
 
-// Đánh giá (sao + bình luận) của chính user cho cửa hàng.
 export async function getUserReview(
   storeId: string,
   userId: string
@@ -276,7 +261,6 @@ export async function getUserReview(
   return row ? { rating: Number(row.rating), comment: String(row.comment ?? '') } : null;
 }
 
-// Độ dài tối đa của bình luận đánh giá.
 export const MAX_REVIEW_COMMENT_LENGTH = 500;
 
 export async function submitStoreRating(
@@ -290,8 +274,8 @@ export async function submitStoreRating(
     return null;
   }
   const cleanComment = comment.trim().slice(0, MAX_REVIEW_COMMENT_LENGTH);
-  // Mỗi user 1 đánh giá/cửa hàng: chấm lại thì cập nhật (UPSERT).
-  // Dùng ISO string từ JS thay vì hàm giờ của từng engine để portable.
+  /* Mỗi user 1 đánh giá/cửa hàng: chấm lại thì cập nhật (UPSERT).
+     Dùng ISO string từ JS thay vì hàm giờ của từng engine để portable. */
   await dbRun(
     `INSERT INTO reviews (store_id, user_id, rating, comment, created_at) VALUES (?, ?, ?, ?, ?)
      ON CONFLICT (store_id, user_id) DO UPDATE SET rating = excluded.rating, comment = excluded.comment, created_at = excluded.created_at`,
@@ -300,8 +284,6 @@ export async function submitStoreRating(
   return getLiveRating(storeId, baseRating);
 }
 
-// Danh sách bình luận (có chữ) của một cửa hàng, mới nhất trước.
-// Chỉ lấy các đánh giá có bình luận để hiển thị.
 export interface StoreReview {
   userId: string;
   userName: string;
@@ -333,7 +315,6 @@ export async function listStoreReviews(storeId: string, limit = 20): Promise<Sto
   }));
 }
 
-// Rating gốc của cửa hàng. Trả null nếu không tồn tại.
 export async function getStoreBaseRating(storeId: string): Promise<number | null> {
   const row = await dbGet<{ base_rating: number }>('SELECT base_rating FROM stores WHERE id = ?', [
     storeId,
@@ -341,8 +322,6 @@ export async function getStoreBaseRating(storeId: string): Promise<number | null
   return row ? Number(row.base_rating) || 0 : null;
 }
 
-// Thêm cửa hàng mới vào DB (dùng khi admin duyệt yêu cầu thêm cửa hàng).
-// Không thêm trùng id để tránh nhân đôi khi duyệt lại.
 export async function addStoreToSeed(store: StoreRecord): Promise<void> {
   const existing = await dbGet<{ id: string }>('SELECT id FROM stores WHERE id = ?', [store.id]);
   if (existing) {
@@ -379,7 +358,6 @@ export async function addStoreToSeed(store: StoreRecord): Promise<void> {
   }
 }
 
-// Các cửa hàng được thêm động từ yêu cầu đã duyệt (id 'store-req-...').
 export async function listDynamicStores(): Promise<StoreRecord[]> {
   const rows = await dbAll<StoreRow>(
     `SELECT id, brand_slug, name, address, lat, lng, base_rating, is_24h, open_hours FROM stores WHERE id LIKE 'store-req-%'`
@@ -421,18 +399,15 @@ async function enrichAndFilterStores(rows: StoreRow[], filters: StoreFilters): P
   const amenityMap = await getAmenitiesByStore(rows.map((row) => row.id));
   const normalizedSearch = search.trim().toLowerCase();
 
-  // Gộp toàn bộ đánh giá trong 1 query (tránh N+1 khi có hàng trăm cửa hàng).
   const voteMap = await getReviewAggregates(rows.map((row) => row.id));
 
   const enriched = rows.map((row) => {
     const base: StoreRecord = toStoreRecord(row, amenityMap.get(row.id) || []);
-    // Ghi đè rating tĩnh bằng rating trực tiếp (đã gồm đánh giá của user).
     const live = liveRatingFromAggregate(base.rating, voteMap.get(base.id));
     const enrichedStore: EnrichedStore = {
       ...base,
       rating: live.rating,
       ratingCount: live.ratingCount,
-      // Ưu tiên giờ mở cửa thực tế thay vì dữ liệu tĩnh có thể đã cũ.
       isOpen: computeIsOpenNow(base),
       distanceMeters: haversineDistanceMeters(lat, lng, base.lat, base.lng),
     };
@@ -458,10 +433,10 @@ async function enrichAndFilterStores(rows: StoreRow[], filters: StoreFilters): P
 
 export async function queryStoresFromDatabase(filters: StoreFilters): Promise<StoreRecord[] | null> {
   try {
-    // Lọc sơ bộ theo bounding-box ngay trong SQL để không phải tải cả bảng
-    // về rồi mới lọc bằng haversine trong JS.
-    // 1 độ vĩ độ ≈ 111.32km; 1 độ kinh độ ≈ 111.32km * cos(vĩ độ).
-    // Lọc chính xác theo bán kính tròn vẫn làm ở JS phía dưới.
+    /* Lọc sơ bộ theo bounding-box ngay trong SQL để không phải tải cả bảng
+       về rồi mới lọc bằng haversine trong JS.
+       1 độ vĩ độ ≈ 111.32km; 1 độ kinh độ ≈ 111.32km * cos(vĩ độ).
+       Lọc chính xác theo bán kính tròn vẫn làm ở JS phía dưới. */
     const latDelta = filters.radius / 111320;
     const lngDelta = filters.radius / (111320 * Math.cos((filters.lat * Math.PI) / 180));
 
@@ -487,14 +462,10 @@ export async function queryStoresFromDatabase(filters: StoreFilters): Promise<St
   }
 }
 
-// Giữ tên hàm cũ cho tương thích: dữ liệu đã nằm hết trong database.
 export async function queryStores(filters: StoreFilters): Promise<StoreRecord[]> {
   return (await queryStoresFromDatabase(filters)) || [];
 }
 
-// ---------------------------------------------------------------------------
-// Admin: kiểm duyệt đánh giá + quản lý danh mục thương hiệu/tiện ích.
-// ---------------------------------------------------------------------------
 
 export interface AdminReviewItem extends StoreReview {
   storeId: string;

@@ -2,8 +2,6 @@ import { NextResponse } from 'next/server';
 import { dbAll, dbGet, dbRun } from '@/lib/db';
 import { getSessionFromRequest } from '@/lib/server-auth';
 
-// Yêu thích lưu trong bảng favorites (theo user id) —
-// đăng nhập máy nào cũng thấy, không còn phụ thuộc localStorage từng trình duyệt.
 function requireSession(req: Request) {
   const session = getSessionFromRequest(req);
   if (!session) {
@@ -12,7 +10,6 @@ function requireSession(req: Request) {
   return session;
 }
 
-// GET /api/favorites → danh sách storeId user đã yêu thích.
 export async function GET(req: Request) {
   const session = requireSession(req);
   if (!session) {
@@ -26,7 +23,6 @@ export async function GET(req: Request) {
   return NextResponse.json({ storeIds: rows.map((row) => row.store_id) });
 }
 
-// POST /api/favorites { storeId } → toggle yêu thích, trả về { favorited }.
 export async function POST(req: Request) {
   const session = requireSession(req);
   if (!session) {

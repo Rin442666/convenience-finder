@@ -9,8 +9,8 @@ import {
   queryStoresFromDatabase,
 } from '@/lib/store-db';
 
-// API trả tối đa bấy nhiêu cửa hàng sau khi sắp xếp — đủ cho UI,
-// tránh render hàng trăm thẻ khi DB có hàng nghìn cửa hàng.
+/* API trả tối đa bấy nhiêu cửa hàng sau khi sắp xếp — đủ cho UI,
+   tránh render hàng trăm thẻ khi DB có hàng nghìn cửa hàng. */
 const MAX_STORE_RESULTS = 100;
 
 function parseArrayParam(value: string | null): string[] {
@@ -24,8 +24,6 @@ function parseArrayParam(value: string | null): string[] {
         .filter(Boolean);
 }
 
-// Kiểu tối thiểu của một kết quả Google Places Nearby Search
-// (chỉ khai báo các field mà code đang dùng).
 type GooglePlaceResult = {
     place_id: string;
     name?: string;
@@ -43,8 +41,6 @@ type GooglePlaceResult = {
     };
 };
 
-// Đoán thương hiệu từ tên địa điểm trả về bởi Google Places.
-// Không đoán được thì trả về 'other' (hiển thị khi lọc "Tất cả").
 function inferBrandId(placeName: string): string {
     const normalized = placeName.toLowerCase();
     if (normalized.includes('circle k')) {
@@ -65,7 +61,6 @@ function inferBrandId(placeName: string): string {
     return 'other';
 }
 
-// Kiểu cửa hàng chuẩn hóa từ Google Places (đầy đủ tọa độ để tính đường bộ).
 type GoogleStoreItem = {
     id: string;
     name: string;
@@ -80,8 +75,6 @@ type GoogleStoreItem = {
     distanceMeters: number;
 };
 
-// Kiểm tra có phải mở 24/7 thật không dựa trên weekday_text
-// (ví dụ: "Monday: Open 24 hours"). Không suy ra từ open_now.
 function isOpen24Hours(place: { opening_hours?: { weekday_text?: unknown } } | null | undefined): boolean {
     const weekdayText = place?.opening_hours?.weekday_text;
     if (!Array.isArray(weekdayText) || weekdayText.length === 0) {
@@ -131,9 +124,6 @@ export async function GET(request: Request) {
                                 rating: typeof place.rating === 'number' ? place.rating : 0,
                                 isOpen: openNow,
                                 is24h: isOpen24Hours(place),
-                                // Google Places không trả về tiện ích chi tiết nên để mảng rỗng
-                                // thay vì gán cứng — filter tiện ích sẽ loại các kết quả này
-                                // một cách trung thực khi người dùng có chọn tiện ích.
                                 amenities: [] as string[],
                                 brandId: inferBrandId(place.name || ''),
                                 distanceMeters: haversineDistanceMeters(lat, lng, placeLat, placeLng),
@@ -155,9 +145,9 @@ export async function GET(request: Request) {
                     { sort, minRating }
                 );
 
-                // Chỉ tính đường bộ cho 30 cửa hàng gần nhất (đường chim bay)
-                // để request OSRM nhẹ; rồi sắp xếp lại, cho khớp với số
-                // Google Maps báo khi bấm "Chỉ đường".
+                /* Chỉ tính đường bộ cho 30 cửa hàng gần nhất (đường chim bay)
+                   để request OSRM nhẹ; rồi sắp xếp lại, cho khớp với số
+                   Google Maps báo khi bấm "Chỉ đường". */
                 const googleStores = applyRatingFilterAndSort(
                     await applyRoadDistancesTop(stores, { lat, lng }),
                     { sort, minRating }
@@ -187,9 +177,6 @@ export async function GET(request: Request) {
     ]);
 
     if (dbCatalog && dbStores) {
-        // Chỉ tính đường bộ cho 30 cửa hàng gần nhất (đường chim bay) để
-        // request OSRM nhẹ rồi sắp xếp lại. Lọc bán kính vẫn theo đường
-        // chim bay như trước. API trả tối đa 100 cửa hàng.
         const roadStores = applyRatingFilterAndSort(
             await applyRoadDistancesTop(dbStores, { lat, lng }),
             { sort, minRating }

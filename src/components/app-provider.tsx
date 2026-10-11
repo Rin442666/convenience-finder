@@ -1,7 +1,5 @@
 'use client';
 
-// State dùng chung cho mọi trang: phiên đăng nhập + dark mode.
-// Mỗi trang bọc trong <AppProvider> (đặt ở layout) rồi dùng useApp().
 import {
     createContext,
     useCallback,
@@ -20,9 +18,9 @@ import {
     persistSession,
 } from '@/lib/client-session';
 
-// Dark mode lưu ở class "dark" trên <html> (script chặn trong <head> của
-// layout gắn sẵn trước khi React hydrate). Đọc qua useSyncExternalStore
-// để lần render đầu của client khớp HTML từ server, tránh hydration mismatch.
+/* Dark mode lưu ở class "dark" trên <html> (script chặn trong <head> của
+   layout gắn sẵn trước khi React hydrate). Đọc qua useSyncExternalStore
+   để lần render đầu của client khớp HTML từ server, tránh hydration mismatch. */
 function subscribeDarkMode(onChange: () => void): () => void {
     const observer = new MutationObserver(onChange);
     observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
@@ -49,8 +47,6 @@ type AppContextValue = {
     register: (fullName: string, email: string, password: string, username?: string) => Promise<boolean>;
     logout: () => void;
     updateCurrentUser: (user: PublicUser) => void;
-    // Trang con gọi requestAuth() khi cần mở modal đăng nhập
-    // (vd: bấm đánh giá lúc chưa đăng nhập).
     requestAuth: () => void;
     authRequestKey: number;
 };
@@ -94,7 +90,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
         try {
             window.localStorage.setItem('finder_dark_mode', value ? '1' : '0');
         } catch {
-            // Bỏ qua khi trình duyệt chặn localStorage.
         }
     }, []);
 
@@ -134,7 +129,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
                     toast(data.message || 'Không thể đăng ký tài khoản.', 'error');
                     return false;
                 }
-                // Đăng ký xong tự động đăng nhập.
                 setCurrentUser(data.user);
                 setAuthToken(data.token);
                 applySession(data.user, data.token);

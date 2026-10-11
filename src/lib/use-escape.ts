@@ -1,5 +1,5 @@
-// Hook dùng chung: bấm phím Esc thì gọi onEscape (đóng modal/popup).
-// active=false thì không lắng nghe (dùng cho modal có early-return).
+/* Hook dùng chung: bấm phím Esc thì gọi onEscape (đóng modal/popup).
+   active=false thì không lắng nghe (dùng cho modal có early-return). */
 import { useEffect } from 'react';
 
 export function useEscapeKey(onEscape: () => void, active = true): void {

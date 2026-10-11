@@ -1,7 +1,7 @@
 'use client';
 
-// Gửi yêu cầu thêm cửa hàng: chọn vị trí trực tiếp trên bản đồ
-// thay vì nhập tọa độ thủ công.
+/* Gửi yêu cầu thêm cửa hàng: chọn vị trí trực tiếp trên bản đồ
+   thay vì nhập tọa độ thủ công. */
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';

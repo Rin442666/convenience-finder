@@ -5,9 +5,6 @@ import { getStoreBaseRating, getUserReview, submitStoreRating, MAX_REVIEW_COMMEN
 // Next.js 16: params là Promise, phải await.
 type RouteParams = { params: Promise<{ id: string }> };
 
-// Lấy đánh giá của chính user đang đăng nhập cho cửa hàng này
-// (để highlight sao đã chấm và điền sẵn bình luận cũ).
-// Khách vãng lai luôn nhận myRating: null.
 export async function GET(req: Request, { params }: RouteParams) {
   const { id } = await params;
   const session = getSessionFromRequest(req);
@@ -23,9 +20,8 @@ export async function GET(req: Request, { params }: RouteParams) {
   });
 }
 
-// Chấm sao 1-5 kèm bình luận (không bắt buộc) cho cửa hàng.
-// Yêu cầu đăng nhập + quyền rate_store (cả role user và admin đều có).
-// Mỗi user 1 đánh giá/cửa hàng; chấm lại thì cập nhật thay vì cộng thêm lượt.
+/* Yêu cầu đăng nhập + quyền rate_store (cả role user và admin đều có).
+   Mỗi user 1 đánh giá/cửa hàng; chấm lại thì cập nhật thay vì cộng thêm lượt. */
 export async function POST(req: Request, { params }: RouteParams) {
   const session = getSessionFromRequest(req);
 

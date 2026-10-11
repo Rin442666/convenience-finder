@@ -1,5 +1,5 @@
-// Xác thực phía SERVER — module này chỉ được import từ API routes,
-// không bao giờ import từ client component.
+/* Xác thực phía SERVER — module này chỉ được import từ API routes,
+   không bao giờ import từ client component. */
 import crypto from 'crypto';
 import { AppUser, Permission, UserRole, hasPermission, permissionByRole } from './auth-system';
 import { dbAll, dbGet, dbRun } from './db';
@@ -19,9 +19,8 @@ function getSecret(): string {
   return secret;
 }
 
-// ---------------------------------------------------------------------------
-// Hash mật khẩu bằng scrypt (có sẵn trong Node, không cần thêm dependency)
-// ---------------------------------------------------------------------------
+/* Hash mật khẩu bằng scrypt (có sẵn trong Node, không cần thêm dependency)
+   --------------------------------------------------------------------------- */
 export function hashPassword(password: string): string {
   const salt = crypto.randomBytes(16).toString('hex');
   const derived = crypto.scryptSync(password, salt, 64).toString('hex');
@@ -41,10 +40,9 @@ export function verifyPassword(password: string, stored: string): boolean {
   return crypto.timingSafeEqual(derived, expected);
 }
 
-// ---------------------------------------------------------------------------
-// Session token tự chứa (HMAC-SHA256): server không cần lưu session,
-// chỉ cần verify chữ ký là biết user id + role.
-// ---------------------------------------------------------------------------
+/* Session token tự chứa (HMAC-SHA256): server không cần lưu session,
+   chỉ cần verify chữ ký là biết user id + role.
+   --------------------------------------------------------------------------- */
 type SessionPayload = {
   sub: string; // user id
   role: UserRole;
@@ -117,10 +115,6 @@ export function sessionHasPermission(session: SessionInfo | null, permission: Pe
   return hasPermission({ role: session.role } as AppUser, permission);
 }
 
-// ---------------------------------------------------------------------------
-// User store phía server — SQLite (data/app.db). Tài khoản đăng ký được giữ
-// lại kể cả khi restart server. Lần đầu chạy, 2 tài khoản demo được seed từ
-// db/seed.sql (user@finder.local / admin@finder.local).
 // ---------------------------------------------------------------------------
 type UserRow = {
   id: string;

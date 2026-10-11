@@ -50,9 +50,9 @@ export const permissionByRole: Record<UserRole, Permission[]> = {
   ],
 };
 
-// Tài khoản demo và logic đăng nhập nằm ở `server-auth.ts` (SQLite).
-// Yêu cầu thêm cửa hàng nằm ở `store-requests.ts` (SQLite, server-only).
-// File này chỉ giữ type, quyền và label — an toàn để import từ client.
+/* Tài khoản demo và logic đăng nhập nằm ở `server-auth.ts` (SQLite).
+   Yêu cầu thêm cửa hàng nằm ở `store-requests.ts` (SQLite, server-only).
+   File này chỉ giữ type, quyền và label — an toàn để import từ client. */
 
 export function hasPermission(user: Partial<AppUser> | null | undefined, permission: Permission): boolean {
   if (!user || !user.role) {

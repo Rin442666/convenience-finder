@@ -1,7 +1,5 @@
 'use client';
 
-// Header dùng chung cho mọi trang: logo, điều hướng, dark mode,
-// menu tài khoản (icon menu cạnh tên hiển thị), modal đăng nhập/đăng ký.
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
@@ -19,11 +17,8 @@ export default function SiteHeader() {
     const accountMenuRef = useRef<HTMLDivElement>(null);
     const lastAuthRequestRef = useRef(0);
 
-    // Bấm Esc thì đóng menu tài khoản.
     useEscapeKey(() => setAccountMenuOpen(false), accountMenuOpen);
 
-    // Trang con (vd: trang chính) có thể yêu cầu mở modal đăng nhập
-    // qua requestAuth() — vd: bấm đánh giá lúc chưa đăng nhập.
     useEffect(() => {
         if (authRequestKey > lastAuthRequestRef.current) {
             lastAuthRequestRef.current = authRequestKey;
@@ -31,7 +26,6 @@ export default function SiteHeader() {
         }
     }, [authRequestKey]);
 
-    // Đóng menu tài khoản khi bấm ra ngoài.
     useEffect(() => {
         if (!accountMenuOpen) {
             return;

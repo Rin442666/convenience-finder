@@ -12,8 +12,6 @@ type ToastItem = {
 
 type PushToast = (message: string, kind?: ToastKind) => void;
 
-// Singleton đơn giản để bất kỳ component nào cũng gọi được `toast(...)`
-// mà không cần context/provider.
 let pushToast: PushToast | null = null;
 
 export function toast(message: string, kind: ToastKind = 'info'): void {

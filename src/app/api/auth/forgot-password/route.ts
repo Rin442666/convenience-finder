@@ -4,8 +4,8 @@ import { dbRun } from '@/lib/db';
 import { findServerUserByEmail } from '@/lib/server-auth';
 import { isMailConfigured, sendPasswordResetEmail } from '@/lib/mail';
 
-// Token sống 15 phút. Lưu ISO string để so sánh TEXT đúng trên cả
-// SQLite và Postgres.
+/* Token sống 15 phút. Lưu ISO string để so sánh TEXT đúng trên cả
+   SQLite và Postgres. */
 const RESET_TTL_MS = 15 * 60 * 1000;
 
 /** POST /api/auth/forgot-password — gửi mail đặt lại mật khẩu. */
@@ -24,8 +24,8 @@ export async function POST(request: Request) {
     }
 
     const user = await findServerUserByEmail(email);
-    // Luôn trả 200 kể cả khi email không tồn tại — không để lộ
-    // tài khoản nào có trong hệ thống.
+    /* Luôn trả 200 kể cả khi email không tồn tại — không để lộ
+       tài khoản nào có trong hệ thống. */
     if (user && user.isActive) {
       const token = crypto.randomBytes(32).toString('hex');
       const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
@@ -40,7 +40,6 @@ export async function POST(request: Request) {
       try {
         await sendPasswordResetEmail(user.email, resetUrl);
       } catch {
-        // Gửi mail lỗi thì thu hồi token để user thử lại sạch sẽ.
         await dbRun(`DELETE FROM password_resets WHERE id = ?`, [id]);
         return NextResponse.json(
           { message: 'Không gửi được email. Vui lòng thử lại sau.' },

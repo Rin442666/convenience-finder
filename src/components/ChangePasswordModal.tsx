@@ -1,7 +1,5 @@
 'use client';
 
-// Modal đổi mật khẩu: nhập mật khẩu hiện tại + mật khẩu mới,
-// server gửi mail xác nhận — mật khẩu chỉ đổi sau khi bấm link trong mail.
 import { useState } from 'react';
 import { X } from 'lucide-react';
 import { toast } from '@/components/Toast';

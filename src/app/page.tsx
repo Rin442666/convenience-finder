@@ -29,7 +29,6 @@ const fallbackAmenityOptions = [
 type CatalogItem = { id: string; name: string };
 
 
-// Định dạng khoảng cách: < 1km hiện mét, >= 1km hiện km.
 function formatDistanceValue(meters?: number): string {
     if (meters === undefined || !Number.isFinite(meters) || meters < 0) {
         return '';
@@ -49,7 +48,6 @@ function formatRadius(meters: number): string {
     return meters < 1000 ? `${meters} m` : `${meters / 1000} km`;
 }
 
-// Định dạng ngày bình luận theo kiểu Việt Nam (dd/MM/yyyy).
 function formatReviewDate(iso: string): string {
     const date = new Date(iso);
     if (Number.isNaN(date.getTime())) {
@@ -58,7 +56,6 @@ function formatReviewDate(iso: string): string {
     return date.toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric' });
 }
 
-// Một bình luận đánh giá (trả về từ GET /api/stores/[id]/reviews).
 interface StoreReviewItem {
     userId: string;
     userName: string;
@@ -67,8 +64,8 @@ interface StoreReviewItem {
     createdAt: string;
 }
 
-// Viewport mobile/desktop: đọc qua useSyncExternalStore (giống darkMode) để
-// lần render đầu của client khớp HTML từ server, tránh hydration mismatch.
+/* Viewport mobile/desktop: đọc qua useSyncExternalStore (giống darkMode) để
+   lần render đầu của client khớp HTML từ server, tránh hydration mismatch. */
 function subscribeMobileViewport(onChange: () => void): () => void {
     const mq = window.matchMedia('(max-width: 1023px)');
     mq.addEventListener('change', onChange);
@@ -93,11 +90,9 @@ export default function Home() {
     const [isLoadingStores, setIsLoadingStores] = useState<boolean>(true);
     const [storesError, setStoresError] = useState<boolean>(false);
     const [storesRetryKey, setStoresRetryKey] = useState<number>(0);
-    // Nguồn vị trí đang dùng để tính khoảng cách: 'locating' (đang xin GPS),
-    // 'gps' (GPS thật), 'denied' (bị từ chối/lỗi -> dùng vị trí mặc định).
     const [locationStatus, setLocationStatus] = useState<'locating' | 'gps' | 'denied'>('locating');
-    // Đánh số request để bỏ qua response cũ về sau (race condition khi
-    // vị trí đổi lúc request trước chưa xong).
+    /* Đánh số request để bỏ qua response cũ về sau (race condition khi
+       vị trí đổi lúc request trước chưa xong). */
     const storesRequestIdRef = useRef<number>(0);
     const [radius, setRadius] = useState<number>(1000);
     const [selectedStore, setSelectedStore] = useState<Store | null>(null);
@@ -105,15 +100,11 @@ export default function Home() {
     const [selectedBrand, setSelectedBrand] = useState<string>('all');
     const [selectedAmenities, setSelectedAmenities] = useState<string[]>([]);
     const [openOnly, setOpenOnly] = useState<boolean>(false);
-    // Thu gọn/mở rộng khối bộ lọc trên mobile (mặc định thu gọn để đỡ chiếm chỗ).
-    // Desktop luôn mở (nút toggle bị ẩn bằng lg:hidden).
     const isMobileViewport = useSyncExternalStore(subscribeMobileViewport, getMobileViewportSnapshot, getMobileViewportServerSnapshot);
     const [mobileFiltersOpen, setMobileFiltersOpen] = useState<boolean>(false);
     const filtersVisible = !isMobileViewport || mobileFiltersOpen;
-    // Sắp xếp + lọc theo đánh giá (gửi lên API để cả 3 nguồn dữ liệu xử lý giống nhau).
     const [sortBy, setSortBy] = useState<'nearest' | 'rating'>('nearest');
     const [minRating, setMinRating] = useState<number>(0);
-    // Số bộ lọc đang bật (hiện badge trên nút thu gọn mobile).
     const activeFilterCount =
         (searchTerm.trim() ? 1 : 0) +
         (radius !== 1000 ? 1 : 0) +
@@ -122,9 +113,6 @@ export default function Home() {
         (minRating > 0 ? 1 : 0) +
         selectedAmenities.length +
         (openOnly ? 1 : 0);
-    // Bộ lọc nháp: người dùng chỉnh ở các control dưới đây, bấm "Áp dụng bộ lọc"
-    // mới đẩy sang state thật và gọi API một lần (trước đây chạm vào control nào
-    // là reload ngay control đó).
     const [draftSearchTerm, setDraftSearchTerm] = useState<string>('');
     const [draftRadius, setDraftRadius] = useState<number>(1000);
     const [draftSelectedBrand, setDraftSelectedBrand] = useState<string>('all');
@@ -132,7 +120,6 @@ export default function Home() {
     const [draftOpenOnly, setDraftOpenOnly] = useState<boolean>(false);
     const [draftSortBy, setDraftSortBy] = useState<'nearest' | 'rating'>('nearest');
     const [draftMinRating, setDraftMinRating] = useState<number>(0);
-    // Có thay đổi nào chưa được áp dụng không (để bật/tắt nút "Áp dụng").
     const hasPendingFilters =
         draftSearchTerm.trim() !== searchTerm.trim() ||
         draftRadius !== radius ||
@@ -150,23 +137,18 @@ export default function Home() {
         setOpenOnly(draftOpenOnly);
         setSortBy(draftSortBy);
         setMinRating(draftMinRating);
-        // Trên mobile thu gọn khối lọc lại để thấy kết quả ngay.
         setMobileFiltersOpen(false);
     };
-    // Chế độ "chọn vị trí trên bản đồ": bật nút rồi click vào bản đồ để tìm
-    // cửa hàng quanh điểm đã chọn thay vì vị trí GPS.
     const [pickingLocation, setPickingLocation] = useState<boolean>(false);
     const [pickedLocation, setPickedLocation] = useState<boolean>(false);
-    // Cửa hàng đang mở modal chi tiết.
     const [detailsStore, setDetailsStore] = useState<Store | null>(null);
-    // Danh sách yêu thích của user đang đăng nhập. Khởi tạo lười từ
-    // localStorage theo session đã lưu; đổi user (login/logout/register)
-    // thì cập nhật ngay trong handler, không dùng effect để tránh
-    // set-state-in-effect.
+    /* Danh sách yêu thích của user đang đăng nhập. Khởi tạo lười từ
+       localStorage theo session đã lưu; đổi user (login/logout/register)
+       thì cập nhật ngay trong handler, không dùng effect để tránh
+       set-state-in-effect. */
     const [favoriteIds, setFavoriteIds] = useState<string[]>([]);
     const [favoritesOnly, setFavoritesOnly] = useState<boolean>(false);
 
-    // Nạp danh sách yêu thích từ server (bảng favorites) sau khi đăng nhập.
     const refreshFavorites = async (token: string) => {
         try {
             const res = await fetch('/api/favorites', {
@@ -179,7 +161,6 @@ export default function Home() {
         }
     };
 
-    // Danh mục thương hiệu/tiện ích lấy từ server (admin quản lý), fallback khi chưa tải được.
     const [catalogBrands, setCatalogBrands] = useState<CatalogItem[]>(fallbackBrandOptions);
     const [catalogAmenities, setCatalogAmenities] = useState<CatalogItem[]>(fallbackAmenityOptions);
     const brandOptions = useMemo(
@@ -191,31 +172,24 @@ export default function Home() {
         [catalogAmenities]
     );
 
-    // Tên thương hiệu để hiển thị trong modal chi tiết (danh mục động từ server).
     function getBrandName(brandId?: string): string {
         const brand = catalogBrands.find((option) => option.id === brandId);
         return brand ? brand.name : 'Cửa hàng tiện lợi';
     }
-    // State cho tính năng đánh giá sao trên từng card cửa hàng.
     const [ratingPickerStoreId, setRatingPickerStoreId] = useState<string | null>(null);
     const [pickerMyRating, setPickerMyRating] = useState<number | null>(null);
-    // Bình luận đi kèm đánh giá trong popover chấm sao.
     const [pickerMyComment, setPickerMyComment] = useState<string>('');
-    // Bình luận hiển thị trong modal chi tiết cửa hàng.
     const [detailsReviews, setDetailsReviews] = useState<StoreReviewItem[]>([]);
     const [loadingReviews, setLoadingReviews] = useState<boolean>(false);
     const [hoverStars, setHoverStars] = useState<number | null>(null);
     const [submittingRating, setSubmittingRating] = useState(false);
 
-    // Bấm Esc: đóng popover chấm sao trước, rồi đến modal chi tiết cửa hàng.
     useEscapeKey(() => setRatingPickerStoreId(null), ratingPickerStoreId !== null);
     useEscapeKey(() => setDetailsStore(null), detailsStore !== null && ratingPickerStoreId === null);
 
-    // Đồng bộ favorites + reset state đánh giá mỗi khi user đổi
-    // (đăng nhập/đăng xuất/đổi tài khoản). Trước đây refreshFavorites
-    // được gọi trong handleLogin/handleRegister; giờ auth nằm ở context
-    // chung nên trang tự phản ứng theo currentUser.
-    // setState trong effect này là có chủ đích (đồng bộ theo user).
+    /* Đồng bộ favorites + reset state đánh giá mỗi khi user đổi
+       (đăng nhập/đăng xuất/đổi tài khoản).
+       setState trong effect này là có chủ đích (đồng bộ theo user). */
     /* eslint-disable react-hooks/set-state-in-effect */
     useEffect(() => {
         if (currentUser && authToken) {
@@ -223,7 +197,6 @@ export default function Home() {
         } else {
             setFavoriteIds([]);
             setFavoritesOnly(false);
-            // Tránh popup đánh giá/chi tiết giữ state của user cũ.
             setRatingPickerStoreId(null);
             setPickerMyRating(null);
             setPickerMyComment('');
@@ -235,7 +208,6 @@ export default function Home() {
     /* eslint-enable react-hooks/set-state-in-effect */
 
     useEffect(() => {
-        // Tải danh mục thương hiệu/tiện ích do admin quản lý (fallback giữ nguyên nếu lỗi).
         fetch('/api/catalog')
             .then((res) => (res.ok ? res.json() : null))
             .then((data) => {
@@ -254,11 +226,8 @@ export default function Home() {
             setLocationStatus('denied');
             return;
         }
-        // Quay về vị trí GPS thật: bỏ điểm đã chọn tay trên bản đồ.
         setPickedLocation(false);
         setPickingLocation(false);
-        // Không set 'locating' đồng bộ ở đây để tránh setState trong effect;
-        // trạng thái đã khởi tạo là 'locating', nút bấm lại cũng không cần.
         navigator.geolocation.getCurrentPosition(
             (position) => {
                 setUserLocation({
@@ -276,8 +245,8 @@ export default function Home() {
     }, []);
 
     useEffect(() => {
-        // Xin GPS 1 lần khi mở trang. setState bên trong requestLocation là
-        // có chủ đích và chỉ chạy 1 lần (deps ổn định) nên không gây vòng lặp render.
+        /* Xin GPS 1 lần khi mở trang. setState bên trong requestLocation là
+           có chủ đích và chỉ chạy 1 lần (deps ổn định) nên không gây vòng lặp render. */
         // eslint-disable-next-line react-hooks/set-state-in-effect
         requestLocation();
     }, [requestLocation]);
@@ -285,9 +254,9 @@ export default function Home() {
 
     useEffect(() => {
         async function fetchStores() {
-            // Mỗi lần fetch tăng số thứ tự; response nào không phải mới nhất
-            // thì bị bỏ qua để tránh response cũ về sau ghi đè dữ liệu mới
-            // (xảy ra khi vị trí GPS về sau lúc request đầu chưa xong).
+            /* Mỗi lần fetch tăng số thứ tự; response nào không phải mới nhất
+               thì bị bỏ qua để tránh response cũ về sau ghi đè dữ liệu mới
+               (xảy ra khi vị trí GPS về sau lúc request đầu chưa xong). */
             const requestId = ++storesRequestIdRef.current;
             const isLatest = () => storesRequestIdRef.current === requestId;
 
@@ -371,10 +340,10 @@ export default function Home() {
                 toast(data.message || 'Không thể cập nhật danh sách yêu thích.', 'error');
                 return;
             }
-            // Tính danh sách mới trước rồi mới setState + toast. Không được gọi
-            // toast() (setState của ToastHost) bên trong updater của setFavoriteIds
-            // vì updater có thể chạy trong lúc render -> React báo lỗi
-            // "Cannot update a component while rendering a different component".
+            /* Tính danh sách mới trước rồi mới setState + toast. Không được gọi
+               toast() (setState của ToastHost) bên trong updater của setFavoriteIds
+               vì updater có thể chạy trong lúc render -> React báo lỗi
+               "Cannot update a component while rendering a different component". */
             const favorited = data.favorited === true;
             const next = favorited
                 ? [...favoriteIds.filter((id) => id !== store.id), store.id]
@@ -387,8 +356,6 @@ export default function Home() {
         }
     };
 
-    // Người dùng click vào bản đồ khi đang ở chế độ chọn vị trí: lấy điểm đó
-    // làm vị trí tìm kiếm mới (tự refetch nhờ userLocation đổi).
     const handleMapClick = (location: UserLocation) => {
         setUserLocation(location);
         setPickedLocation(true);
@@ -397,14 +364,12 @@ export default function Home() {
         toast('Đã chọn vị trí mới trên bản đồ.', 'success');
     };
 
-    // Mở modal chi tiết cửa hàng (đồng thời chọn trên bản đồ để xem vị trí).
     const openStoreDetails = (store: Store) => {
         setSelectedStore(store);
         setDetailsStore(store);
         void loadStoreReviews(store.id);
     };
 
-    // Tải bình luận đánh giá cho modal chi tiết.
     const loadStoreReviews = async (storeId: string) => {
         setDetailsReviews([]);
         setLoadingReviews(true);
@@ -419,7 +384,6 @@ export default function Home() {
         }
     };
 
-    // Mở bảng chấm sao cho cửa hàng. Chưa đăng nhập thì mời đăng nhập.
     const openRatingPicker = async (store: Store) => {
         if (!currentUser) {
             toast('Đăng nhập để đánh giá cửa hàng.', 'info');
@@ -440,7 +404,6 @@ export default function Home() {
             setPickerMyRating(typeof data.myRating === 'number' ? data.myRating : null);
             setPickerMyComment(typeof data.myComment === 'string' ? data.myComment : '');
         } catch {
-            // Không lấy được đánh giá cũ thì vẫn cho chấm sao bình thường.
         }
     };
 
@@ -468,7 +431,6 @@ export default function Home() {
                 return;
             }
 
-            // Cập nhật rating hiển thị ngay trên card, không cần tải lại danh sách.
             setStores((prevStores) =>
                 prevStores.map((item) =>
                     item.id === store.id ? { ...item, rating: data.rating, ratingCount: data.ratingCount } : item
@@ -496,20 +458,14 @@ export default function Home() {
         openDirections(store);
     };
 
-    // Số liệu cho thẻ "Tổng quan" dưới bộ lọc — tính trực tiếp từ kết quả
-    // đang hiển thị nên tự cập nhật khi đổi filter/tìm kiếm.
-    // Khi sắp xếp theo đánh giá, cửa hàng đầu danh sách là đánh giá cao nhất.
     const openStoreCount = stores.filter((store) => store.isOpen || store.is24h).length;
     const nearestStore = sortBy === 'nearest' && stores.length > 0 ? stores[0] : undefined;
-    // Tab "Yêu thích": lọc client-side theo danh sách đã lưu của user.
     const displayedStores = favoritesOnly ? stores.filter((store) => favoriteIds.includes(store.id)) : stores;
 
     return (
         <>
 
-            {/* Thanh bộ lọc ngang gọn (thay sidebar dài) + dải thống kê luôn nhìn thấy */}
             <div className="max-w-7xl mx-auto mb-6 rounded-2xl bg-white dark:bg-gray-900 px-4 py-3.5 shadow-md">
-                {/* Nút thu gọn/mở rộng bộ lọc: chỉ hiện trên mobile, desktop luôn mở */}
                 <button
                     type="button"
                     onClick={() => setMobileFiltersOpen((prev) => !prev)}
@@ -684,9 +640,6 @@ export default function Home() {
             <div className="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_340px] gap-6">
 
                 <div className="relative bg-white dark:bg-gray-900 rounded-2xl shadow-md p-2 h-[600px]">
-                        {/* Cụm nút đặt ở góc phải để không che nút zoom +/- (góc trái) của bản đồ.
-                            z-10: đủ nổi trên các lớp của Leaflet, nhưng thấp hơn modal (z-40)
-                            để không đè lên modal chi tiết khi mở. */}
                         <div className="absolute right-4 top-4 z-10 flex gap-2">
                             <button
                                 type="button"

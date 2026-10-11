@@ -1,15 +1,15 @@
-// Tầng database dùng chung (server-only, KHÔNG import từ client).
-//
-// Dual-mode:
-// - Mặc định: SQLite file (data/app.db) qua node:sqlite — không cần cài gì,
-//   phù hợp dev 2 người (schema + seed commit lên git, file .db gitignore
-//   và tự tạo lần đầu chạy).
-// - Production: set DATABASE_URL=postgres://... → tự dùng PostgreSQL
-//   (cần `npm install pg`). Việc "lên đời" sau này chỉ là đổi biến môi trường.
-//
-// Mọi câu SQL trong app viết bằng placeholder `?`; helper tự dịch sang
-// `$1, $2...` khi chạy Postgres. Tránh dùng hàm đặc thù của từng engine
-// trong DML (dùng ISO string từ JS thay vì datetime('now')/now()).
+/* Tầng database dùng chung (server-only, KHÔNG import từ client).
+
+   Dual-mode:
+   - Mặc định: SQLite file (data/app.db) qua node:sqlite — không cần cài gì,
+     phù hợp dev 2 người (schema + seed commit lên git, file .db gitignore
+     và tự tạo lần đầu chạy).
+   - Production: set DATABASE_URL=postgres://... → tự dùng PostgreSQL
+     (cần `npm install pg`). Việc "lên đời" sau này chỉ là đổi biến môi trường.
+
+   Mọi câu SQL trong app viết bằng placeholder `?`; helper tự dịch sang
+   `$1, $2...` khi chạy Postgres. Tránh dùng hàm đặc thù của từng engine
+   trong DML (dùng ISO string từ JS thay vì datetime('now')/now()). */
 import fs from 'node:fs';
 import path from 'node:path';
 import type { DatabaseSync, SQLInputValue } from 'node:sqlite';
@@ -24,12 +24,11 @@ export function getDbMode(): DbMode {
 }
 
 type PgPoolLike = Pick<Pool, 'query'>;
-// Pool thật từ package pg (chỉ load khi DATABASE_URL là postgres).
 
 let sqliteDb: DatabaseSync | null = null;
 let pgPool: PgPoolLike | null = null;
-// Promise init dùng chung để chống race condition khi nhiều request
-// gọi ensureInitialized() đồng thời (vd: Promise.all trong API route).
+/* Promise init dùng chung để chống race condition khi nhiều request
+   gọi ensureInitialized() đồng thời (vd: Promise.all trong API route). */
 let initPromise: Promise<void> | null = null;
 
 function getSchemaDir(): string {
@@ -40,8 +39,8 @@ function getSqlitePath(): string {
   return process.env.SQLITE_PATH || path.join(process.cwd(), 'data', 'app.db');
 }
 
-// Dịch placeholder ? -> $1, $2... cho Postgres.
-// (SQL trong app không chứa ký tự ? trong string literal nên an toàn.)
+/* Dịch placeholder ? -> $1, $2... cho Postgres.
+   (SQL trong app không chứa ký tự ? trong string literal nên an toàn.) */
 function toPostgresPlaceholders(sql: string): string {
   let index = 0;
   return sql.replace(/\?/g, () => `$${++index}`);
@@ -66,8 +65,6 @@ async function getPgPool(): Promise<PgPoolLike> {
   return pgPool;
 }
 
-// Import 1 lần dữ liệu cũ từ thời JSON file (patch-11: data/*.json) vào DB mới
-// để không mất request/cửa hàng đã duyệt trước đó. Chỉ chạy ở chế độ SQLite.
 function importLegacyJsonFiles(db: DatabaseSync): void {
   try {
     const requestsPath = path.join(process.cwd(), 'data', 'store-requests.json');
@@ -104,7 +101,6 @@ function importLegacyJsonFiles(db: DatabaseSync): void {
       }
     }
   } catch {
-    // File cũ hỏng/thiếu thì bỏ qua, không chặn khởi động.
   }
 
   try {
@@ -146,14 +142,12 @@ function importLegacyJsonFiles(db: DatabaseSync): void {
       }
     }
   } catch {
-    // Bỏ qua.
   }
 }
 
 function ensureInitialized(): Promise<void> {
   if (!initPromise) {
     initPromise = doInit().catch((err: unknown) => {
-      // Init lỗi thì cho phép thử lại ở request sau thay vì kẹt vĩnh viễn.
       initPromise = null;
       throw err;
     });
@@ -193,14 +187,10 @@ async function doInit(): Promise<void> {
   await runMigrations();
 }
 
-// Migration lũy tiến cho DB đã tồn tại từ trước (không chạy lại schema).
-// Mỗi migration tự kiểm tra đã áp dụng chưa nên gọi lại nhiều lần vẫn an toàn.
 async function runMigrations(): Promise<void> {
   if (getDbMode() === 'postgres') {
     const pool = await getPgPool();
-    // Postgres hỗ trợ IF NOT EXISTS cho ADD COLUMN.
     await pool.query(`ALTER TABLE reviews ADD COLUMN IF NOT EXISTS comment TEXT NOT NULL DEFAULT ''`);
-    // Bảng token đặt lại mật khẩu (quên mật khẩu qua email).
     await pool.query(`CREATE TABLE IF NOT EXISTS password_resets (
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL REFERENCES users (id),
@@ -210,14 +200,12 @@ async function runMigrations(): Promise<void> {
       created_at TEXT NOT NULL DEFAULT (now()::text)
     )`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_password_resets_token ON password_resets (token_hash)`);
-    // Đổi mật khẩu qua mail xác nhận cần cột username + mật khẩu chờ xác nhận.
-    // (SQLite/Postgres đều không thêm UNIQUE trực tiếp qua ADD COLUMN một cách
-    // an toàn nên tạo UNIQUE INDEX riêng sau khi backfill.)
+    /* (SQLite/Postgres đều không thêm UNIQUE trực tiếp qua ADD COLUMN một cách
+       an toàn nên tạo UNIQUE INDEX riêng sau khi backfill.) */
     await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS username TEXT`);
     await pool.query(
       `ALTER TABLE password_resets ADD COLUMN IF NOT EXISTS pending_password_hash TEXT`
     );
-    // User cũ: username mặc định lấy từ giá trị email đang lưu.
     await pool.query(`UPDATE users SET username = email WHERE username IS NULL`);
     await pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username ON users (username)`);
     return;
@@ -242,9 +230,6 @@ async function runMigrations(): Promise<void> {
     )`);
     db.exec(`CREATE INDEX idx_password_resets_token ON password_resets (token_hash)`);
   }
-  // SQLite: thêm cột username cho users (tài khoản cũ lấy username từ email đang lưu),
-  // thêm cột pending_password_hash cho password_resets (đổi mật khẩu qua mail xác nhận).
-  // Lưu ý: SQLite không cho ADD COLUMN kèm UNIQUE -> tạo UNIQUE INDEX riêng.
   const userCols = db.prepare(`PRAGMA table_info(users)`).all() as { name: string }[];
   if (!userCols.some((col) => col.name === 'username')) {
     db.exec(`ALTER TABLE users ADD COLUMN username TEXT`);
@@ -268,7 +253,6 @@ function toSqliteParams(params: unknown[]): SQLInputValue[] {
   return params as SQLInputValue[];
 }
 
-// SELECT nhiều dòng.
 export async function dbAll<T = Record<string, unknown>>(
   sql: string,
   params: unknown[] = []
@@ -282,7 +266,6 @@ export async function dbAll<T = Record<string, unknown>>(
   return requireSqliteDb().prepare(sql).all(...toSqliteParams(params)) as T[];
 }
 
-// SELECT 1 dòng (hoặc undefined).
 export async function dbGet<T = Record<string, unknown>>(
   sql: string,
   params: unknown[] = []
@@ -291,7 +274,6 @@ export async function dbGet<T = Record<string, unknown>>(
   return rows[0];
 }
 
-// INSERT/UPDATE/DELETE. Trả về số dòng bị ảnh hưởng.
 export async function dbRun(sql: string, params: unknown[] = []): Promise<{ changes: number }> {
   await ensureInitialized();
   if (getDbMode() === 'postgres') {
@@ -303,7 +285,6 @@ export async function dbRun(sql: string, params: unknown[] = []): Promise<{ chan
   return { changes: Number(info.changes) };
 }
 
-// Chạy DDL/script không tham số (schema, seed).
 export async function dbExec(sql: string): Promise<void> {
   await ensureInitialized();
   if (getDbMode() === 'postgres') {

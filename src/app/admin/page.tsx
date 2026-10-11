@@ -1,7 +1,5 @@
 'use client';
 
-// Trang quản trị: tabs người dùng / đánh giá / danh mục / yêu cầu,
-// cùng bản đồ + danh sách cửa hàng (bấm vào để sửa/xóa thay vì chỉ đường).
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { MapPin, Pencil, RotateCcw, Trash2, X } from 'lucide-react';
@@ -74,7 +72,6 @@ export default function AdminPage() {
     const [editingCatalogName, setEditingCatalogName] = useState('');
     const [confirmDeleteKey, setConfirmDeleteKey] = useState<string | null>(null);
 
-    // Quản lý cửa hàng: bản đồ + danh sách + form sửa.
     const [adminStores, setAdminStores] = useState<AdminStoreItem[]>([]);
     const [storeStatusFilter, setStoreStatusFilter] = useState<'ALL' | 'ACTIVE' | 'INACTIVE'>('ACTIVE');
     const [selectedStoreId, setSelectedStoreId] = useState<string | null>(null);
@@ -88,7 +85,6 @@ export default function AdminPage() {
     const [editLocation, setEditLocation] = useState<UserLocation | null>(null);
     const [savingStore, setSavingStore] = useState(false);
 
-    // Bấm Esc: đóng modal sửa cửa hàng (hoặc hủy trạng thái "bấm lần nữa để xóa").
     useEscapeKey(() => setEditingStore(null), editingStore !== null);
     useEscapeKey(() => setConfirmDeleteKey(null), editingStore === null && confirmDeleteKey !== null);
 
@@ -104,7 +100,6 @@ export default function AdminPage() {
         ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
     });
 
-    // ---- Tải dữ liệu theo tab ----
     const loadAdminUsers = async () => {
         try {
             const res = await fetch('/api/admin/users', { headers: adminHeaders() });
@@ -137,8 +132,8 @@ export default function AdminPage() {
         }
     };
 
-    // Tải brands/amenities — dùng chung cho tab Danh mục và modal sửa cửa hàng.
-    // Tách khỏi flag tab để modal sửa luôn có data dù chưa mở tab Danh mục.
+    /* Tải brands/amenities — dùng chung cho tab Danh mục và modal sửa cửa hàng.
+       Tách khỏi flag tab để modal sửa luôn có data dù chưa mở tab Danh mục. */
     const fetchCatalog = async (): Promise<boolean> => {
         try {
             const [brandRes, amenityRes] = await Promise.all([
@@ -160,7 +155,6 @@ export default function AdminPage() {
         }
     };
 
-    // Tải 1 lần duy nhất khi vào trang admin (cho modal sửa cửa hàng).
     const ensureCatalog = async () => {
         if (catalogReady) {
             return;
@@ -207,15 +201,12 @@ export default function AdminPage() {
             } else {
                 await loadPendingRequests();
             }
-            // Brands/amenities dùng cho modal sửa cửa hàng — tải sẵn 1 lần,
-            // không cần chờ mở tab Danh mục.
             await ensureCatalog();
         }
         fetchCurrentAdminTab();
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [authReady, isAdmin, adminTab]);
 
-    // ---- Danh sách cửa hàng cho admin ----
     const loadAdminStores = async () => {
         try {
             const params = storeStatusFilter === 'ALL' ? '' : `?status=${storeStatusFilter}`;
@@ -245,7 +236,6 @@ export default function AdminPage() {
         return null;
     }
 
-    // ---- Thao tác người dùng ----
     const handleToggleUserActive = async (user: AdminUserItem) => {
         try {
             const res = await fetch(`/api/admin/users/${encodeURIComponent(user.id)}`, {
@@ -289,7 +279,6 @@ export default function AdminPage() {
         }
     };
 
-    // ---- Danh mục ----
     const handleAddCatalogItem = async (kind: 'brands' | 'amenities') => {
         const slug = kind === 'brands' ? newBrandSlug : newAmenitySlug;
         const name = kind === 'brands' ? newBrandName : newAmenityName;
@@ -363,7 +352,6 @@ export default function AdminPage() {
         }
     };
 
-    // ---- Yêu cầu thêm cửa hàng ----
     const handleApproveRequest = async (requestId: string, status: 'APPROVED' | 'REJECTED') => {
         if (!currentUser || !hasPermission(currentUser, 'approve_store_request')) {
             toast('Chỉ Admin mới được xác nhận yêu cầu.', 'error');
@@ -394,7 +382,6 @@ export default function AdminPage() {
         }
     };
 
-    // ---- Sửa / ẩn / khôi phục cửa hàng ----
     const openEditStore = async (id: string) => {
         try {
             const res = await fetch(`/api/admin/stores/${encodeURIComponent(id)}`, {
@@ -531,7 +518,6 @@ export default function AdminPage() {
 
     return (
         <div className="max-w-7xl mx-auto space-y-6">
-            {/* Panel quản trị: tabs */}
             <div className="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 p-5 shadow-sm">
                 <h3 className="text-lg font-bold text-gray-900 dark:text-gray-100">Quản trị hệ thống</h3>
                 <div className="mt-3 flex gap-2 border-b border-gray-200 dark:border-gray-700 overflow-x-auto">
@@ -784,7 +770,6 @@ export default function AdminPage() {
                 )}
             </div>
 
-            {/* Bản đồ + danh sách cửa hàng (bấm để sửa/xóa, không chỉ đường) */}
             <div className="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 p-5 shadow-sm">
                 <div className="flex items-center justify-between gap-3 flex-wrap">
                     <h3 className="text-lg font-bold text-gray-900 dark:text-gray-100">
@@ -860,7 +845,6 @@ export default function AdminPage() {
                 </p>
             </div>
 
-            {/* Modal sửa cửa hàng */}
             {editingStore && (
                 <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-900/50 p-4 overflow-y-auto">
                     <div className="w-full max-w-lg rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 p-6 shadow-2xl my-8">

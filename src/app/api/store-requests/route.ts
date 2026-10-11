@@ -4,8 +4,8 @@ import { findServerUserById, getSessionFromRequest, sessionHasPermission } from 
 import { addStoreToSeed, findBrandByName, listAmenitiesDb, type StoreRecord } from '@/lib/store-db';
 
 export async function GET(req: Request) {
-  // Quyền admin được suy ra từ session token đã verify,
-  // không tin query param `role` do client gửi lên.
+  /* Quyền admin được suy ra từ session token đã verify,
+     không tin query param `role` do client gửi lên. */
   const session = getSessionFromRequest(req);
 
   if (!sessionHasPermission(session, 'approve_store_request')) {
@@ -42,7 +42,6 @@ export async function POST(req: Request) {
       notes: String(body.notes || '').trim(),
     });
 
-    // Lưu ra file để restart server không mất yêu cầu.
 
     return NextResponse.json({
       request: createdRequest,
@@ -86,12 +85,8 @@ export async function PATCH(req: Request) {
       );
     }
 
-    // Lưu trạng thái mới ra file để restart server không bị quay về PENDING.
 
-    // Khi admin duyệt: đưa cửa hàng mới vào danh sách để hiện ngay trên
-    // bản đồ/danh sách. Bỏ qua nếu tọa độ không hợp lệ.
     if (updated.status === 'APPROVED' && Number.isFinite(updated.lat) && Number.isFinite(updated.lng) && updated.lat !== 0 && updated.lng !== 0) {
-      // Tra thương hiệu theo tên từ DB (danh mục do admin quản lý, không fix cứng).
       const brand = await findBrandByName(updated.brandName);
       const dbAmenities = await listAmenitiesDb();
       const validAmenityIds = dbAmenities.map((amenity) => amenity.id);
@@ -108,7 +103,6 @@ export async function PATCH(req: Request) {
         amenities: updated.amenities.filter((amenityId) => validAmenityIds.includes(amenityId)),
       };
       await addStoreToSeed(newStore);
-      // Lưu cửa hàng đã duyệt ra file để restart server không bị mất.
     }
 
     return NextResponse.json({ request: updated });

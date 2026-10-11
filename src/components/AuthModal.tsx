@@ -1,8 +1,5 @@
 'use client';
 
-// Modal đăng nhập / đăng ký. Dùng chung cho mọi trang
-// (hiển thị từ SiteHeader). Enter trong form = gửi, không cần bấm nút.
-// Quên mật khẩu có trang riêng /quen-mat-khau.
 import { useState } from 'react';
 import { X } from 'lucide-react';
 import { useRouter } from 'next/navigation';

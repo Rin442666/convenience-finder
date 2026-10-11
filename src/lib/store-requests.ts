@@ -1,5 +1,5 @@
-// Nghiệp vụ yêu cầu thêm cửa hàng — SQLite (server-only,
-// KHÔNG import từ client component vì dùng node:sqlite qua getDb()).
+/* Nghiệp vụ yêu cầu thêm cửa hàng — SQLite (server-only,
+   KHÔNG import từ client component vì dùng node:sqlite qua getDb()). */
 import { dbAll, dbGet, dbRun } from './db';
 import type { StoreRequestRecord, StoreRequestStatus } from './auth-system';
 

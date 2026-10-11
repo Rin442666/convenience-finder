@@ -1,14 +1,11 @@
-// Khoảng cách đường bộ qua OSRM Table service (cùng engine với nét vẽ
-// chỉ đường trên bản đồ). Dùng để hiển thị/sắp xếp/lọc theo quãng đường
-// thực tế thay vì đường chim bay (haversine), cho sai số nhỏ so với Google Maps.
 
 export type LatLng = { lat: number; lng: number };
 
 const OSRM_TABLE_URL = 'https://router.project-osrm.org/table/v1/driving';
 // OSRM demo server miễn phí nhưng giới hạn ~100 tọa độ/request.
 const MAX_COORDS_PER_REQUEST = 99;
-// Chỉ tính đường bộ cho N cửa hàng gần nhất (theo đường chim bay) —
-// request nhỏ thì OSRM trả nhanh, không phải chờ ma trận 100x100.
+/* Chỉ tính đường bộ cho N cửa hàng gần nhất (theo đường chim bay) —
+   request nhỏ thì OSRM trả nhanh, không phải chờ ma trận 100x100. */
 export const ROAD_TOP_N = 30;
 const REQUEST_TIMEOUT_MS = 3000;
 const CACHE_TTL_MS = 120_000;
@@ -61,8 +58,8 @@ export async function getRoadDistances(
       if (data?.code !== 'Ok' || !Array.isArray(row)) {
         return fallback;
       }
-      // distances[0][0] là origin->origin (=0); destination thứ i ở index i+1.
-      // Điểm nào không đi được bằng đường bộ thì entry là null.
+      /* distances[0][0] là origin->origin (=0); destination thứ i ở index i+1.
+         Điểm nào không đi được bằng đường bộ thì entry là null. */
       const values = limited.map((_, i) => {
         const v = row[i + 1];
         return typeof v === 'number' && v >= 0 ? v : null;
@@ -95,7 +92,6 @@ export async function applyRoadDistancesTop<T extends LatLng & { distanceMeters?
   if (stores.length === 0) {
     return stores;
   }
-  // Chỉ số sắp theo khoảng cách chim bay tăng dần.
   const order = stores
     .map((_, i) => i)
     .sort((a, b) => (stores[a].distanceMeters ?? 0) - (stores[b].distanceMeters ?? 0));
