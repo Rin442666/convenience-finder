@@ -176,16 +176,13 @@ export default function Home() {
         const brand = catalogBrands.find((option) => option.id === brandId);
         return brand ? brand.name : 'Cửa hàng tiện lợi';
     }
-    const [ratingPickerStoreId, setRatingPickerStoreId] = useState<string | null>(null);
-    const [pickerMyRating, setPickerMyRating] = useState<number | null>(null);
-    const [pickerMyComment, setPickerMyComment] = useState<string>('');
+    const [myRating, setMyRating] = useState<number | null>(null);
+    const [myComment, setMyComment] = useState<string>('');
     const [detailsReviews, setDetailsReviews] = useState<StoreReviewItem[]>([]);
     const [loadingReviews, setLoadingReviews] = useState<boolean>(false);
-    const [hoverStars, setHoverStars] = useState<number | null>(null);
     const [submittingRating, setSubmittingRating] = useState(false);
 
-    useEscapeKey(() => setRatingPickerStoreId(null), ratingPickerStoreId !== null);
-    useEscapeKey(() => setDetailsStore(null), detailsStore !== null && ratingPickerStoreId === null);
+    useEscapeKey(() => setDetailsStore(null), detailsStore !== null);
 
     /* Đồng bộ favorites + reset state đánh giá mỗi khi user đổi
        (đăng nhập/đăng xuất/đổi tài khoản).
@@ -197,10 +194,8 @@ export default function Home() {
         } else {
             setFavoriteIds([]);
             setFavoritesOnly(false);
-            setRatingPickerStoreId(null);
-            setPickerMyRating(null);
-            setPickerMyComment('');
-            setHoverStars(null);
+            setMyRating(null);
+            setMyComment('');
             setDetailsStore(null);
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -367,7 +362,25 @@ export default function Home() {
     const openStoreDetails = (store: Store) => {
         setSelectedStore(store);
         setDetailsStore(store);
+        setMyRating(null);
+        setMyComment('');
         void loadStoreReviews(store.id);
+        void loadMyRating(store.id);
+    };
+
+    const loadMyRating = async (storeId: string) => {
+        if (!currentUser || !authToken) {
+            return;
+        }
+        try {
+            const res = await fetch(`/api/stores/${encodeURIComponent(storeId)}/rate`, {
+                headers: { Authorization: `Bearer ${authToken}` },
+            });
+            const data = await res.json();
+            setMyRating(typeof data.myRating === 'number' ? data.myRating : null);
+            setMyComment(typeof data.myComment === 'string' ? data.myComment : '');
+        } catch {
+        }
     };
 
     const loadStoreReviews = async (storeId: string) => {
@@ -381,29 +394,6 @@ export default function Home() {
             setDetailsReviews([]);
         } finally {
             setLoadingReviews(false);
-        }
-    };
-
-    const openRatingPicker = async (store: Store) => {
-        if (!currentUser) {
-            toast('Đăng nhập để đánh giá cửa hàng.', 'info');
-            requestAuth();
-            return;
-        }
-
-        setRatingPickerStoreId(store.id);
-        setPickerMyRating(null);
-        setPickerMyComment('');
-        setHoverStars(null);
-
-        try {
-            const res = await fetch(`/api/stores/${encodeURIComponent(store.id)}/rate`, {
-                headers: authToken ? { Authorization: `Bearer ${authToken}` } : {},
-            });
-            const data = await res.json();
-            setPickerMyRating(typeof data.myRating === 'number' ? data.myRating : null);
-            setPickerMyComment(typeof data.myComment === 'string' ? data.myComment : '');
-        } catch {
         }
     };
 
@@ -422,7 +412,7 @@ export default function Home() {
                     'Content-Type': 'application/json',
                     ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
                 },
-                body: JSON.stringify({ stars, comment: pickerMyComment }),
+                body: JSON.stringify({ stars, comment: myComment }),
             });
             const data = await res.json();
 
@@ -436,7 +426,11 @@ export default function Home() {
                     item.id === store.id ? { ...item, rating: data.rating, ratingCount: data.ratingCount } : item
                 )
             );
-            setPickerMyRating(stars);
+            setMyRating(stars);
+            if (detailsStore && detailsStore.id === store.id) {
+                setDetailsStore({ ...detailsStore, rating: data.rating, ratingCount: data.ratingCount });
+                void loadStoreReviews(store.id);
+            }
             toast('Cảm ơn bạn đã đánh giá!', 'success');
         } catch (error) {
             console.error('Lỗi gửi đánh giá:', error);
@@ -813,100 +807,13 @@ export default function Home() {
                                                             }`}
                                                     />
                                                 </button>
-                                            <div className="relative">
-                                                <button
-                                                    type="button"
-                                                    title="Đánh giá cửa hàng"
-                                                    onClick={(e) => {
-                                                        e.stopPropagation();
-                                                        if (ratingPickerStoreId === store.id) {
-                                                            setRatingPickerStoreId(null);
-                                                        } else {
-                                                            openRatingPicker(store);
-                                                        }
-                                                    }}
-                                                    className="flex items-center gap-1 text-xs font-medium text-amber-500 whitespace-nowrap hover:text-amber-600 dark:hover:text-amber-400"
-                                                >
-                                                    <Star className="h-3.5 w-3.5 fill-amber-400 text-amber-400" />
-                                                    {(store.rating ?? 0) > 0 ? store.rating : '—'}
-                                                    {(store.ratingCount ?? 0) > 0 && (
-                                                        <span className="text-gray-400 dark:text-gray-500">({store.ratingCount})</span>
-                                                    )}
-                                                </button>
-                                                {ratingPickerStoreId === store.id && (
-                                                    <div
-                                                        onClick={(e) => e.stopPropagation()}
-                                                        className="absolute right-0 z-20 mt-1 w-64 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 p-3 shadow-lg"
-                                                    >
-                                                        <p className="mb-2 text-xs font-medium text-gray-700 dark:text-gray-300">
-                                                            Đánh giá của bạn
-                                                        </p>
-                                                        <div
-                                                            className="flex gap-1"
-                                                            onMouseLeave={() => setHoverStars(null)}
-                                                        >
-                                                            {[1, 2, 3, 4, 5].map((starValue) => {
-                                                                const activeValue = hoverStars ?? pickerMyRating ?? 0;
-                                                                return (
-                                                                    <button
-                                                                        key={starValue}
-                                                                        type="button"
-                                                                        disabled={submittingRating}
-                                                                        onMouseEnter={() => setHoverStars(starValue)}
-                                                                        onClick={() => setPickerMyRating(starValue)}
-                                                                        className="disabled:opacity-50"
-                                                                        aria-label={`${starValue} sao`}
-                                                                    >
-                                                                        <Star
-                                                                            className={`h-6 w-6 ${starValue <= activeValue
-                                                                                    ? 'fill-amber-400 text-amber-400'
-                                                                                    : 'text-gray-300 dark:text-gray-600'
-                                                                                }`}
-                                                                        />
-                                                                    </button>
-                                                                );
-                                                            })}
-                                                        </div>
-                                                        <textarea
-                                                            value={pickerMyComment}
-                                                            onChange={(e) => setPickerMyComment(e.target.value.slice(0, 500))}
-                                                            rows={2}
-                                                            maxLength={500}
-                                                            disabled={submittingRating}
-                                                            placeholder="Viết bình luận (không bắt buộc)..."
-                                                            className="mt-2 w-full resize-none rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 px-2.5 py-2 text-xs text-gray-800 dark:text-gray-200 placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
-                                                        />
-                                                        {pickerMyRating !== null ? (
-                                                            <p className="mt-2 text-[11px] text-gray-500 dark:text-gray-400">
-                                                                Bạn đã chấm {pickerMyRating} sao. Sửa sao/bình luận rồi bấm Lưu để cập nhật.
-                                                            </p>
-                                                        ) : (
-                                                            <p className="mt-2 text-[11px] text-gray-500 dark:text-gray-400">
-                                                                Chọn số sao, viết bình luận (nếu muốn) rồi bấm Lưu.
-                                                            </p>
-                                                        )}
-                                                        <button
-                                                            type="button"
-                                                            disabled={submittingRating || pickerMyRating === null}
-                                                            onClick={() => {
-                                                                if (pickerMyRating !== null) {
-                                                                    submitRating(store, pickerMyRating);
-                                                                }
-                                                            }}
-                                                            className="mt-2 w-full rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
-                                                        >
-                                                            {submittingRating ? 'Đang lưu...' : 'Lưu đánh giá'}
-                                                        </button>
-                                                        <button
-                                                            type="button"
-                                                            onClick={() => setRatingPickerStoreId(null)}
-                                                            className="mt-2 text-[11px] font-medium text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300"
-                                                        >
-                                                            Đóng
-                                                        </button>
-                                                    </div>
+                                            <span className="flex items-center gap-1 text-xs font-medium text-amber-500 whitespace-nowrap">
+                                                <Star className="h-3.5 w-3.5 fill-amber-400 text-amber-400" />
+                                                {(store.rating ?? 0) > 0 ? store.rating : '—'}
+                                                {(store.ratingCount ?? 0) > 0 && (
+                                                    <span className="text-gray-400 dark:text-gray-500">({store.ratingCount})</span>
                                                 )}
-                                            </div>
+                                            </span>
                                             </div>
                                         </div>
 
@@ -971,7 +878,7 @@ export default function Home() {
                 >
                     <div
                         onClick={(e) => e.stopPropagation()}
-                        className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 p-6 shadow-2xl"
+                        className="max-h-[90vh] w-full max-w-xl overflow-y-auto rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 p-6 shadow-2xl"
                     >
                         <div className="flex items-start justify-between gap-3">
                             <div>
@@ -1093,6 +1000,79 @@ export default function Home() {
                                         </div>
                                     ))}
                                 </div>
+                            )}
+                        </div>
+
+                        <div className="mt-4 border-t border-gray-100 dark:border-gray-800 pt-4">
+                            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                                Đánh giá của bạn
+                            </p>
+                            {currentUser ? (
+                                <>
+                                    <div className="flex items-center gap-1">
+                                        {[1, 2, 3, 4, 5].map((starValue) => (
+                                            <button
+                                                key={starValue}
+                                                type="button"
+                                                disabled={submittingRating}
+                                                onClick={() => setMyRating(starValue)}
+                                                className="disabled:opacity-50"
+                                                aria-label={`${starValue} sao`}
+                                            >
+                                                <Star
+                                                    className={`h-5 w-5 ${starValue <= (myRating ?? 0)
+                                                            ? 'fill-amber-400 text-amber-400'
+                                                            : 'text-gray-300 dark:text-gray-600'
+                                                        }`}
+                                                />
+                                            </button>
+                                        ))}
+                                        {myRating !== null && (
+                                            <span className="ml-1 text-xs text-gray-500 dark:text-gray-400">
+                                                Bạn chấm {myRating} sao
+                                            </span>
+                                        )}
+                                    </div>
+                                    <textarea
+                                        value={myComment}
+                                        onChange={(e) => setMyComment(e.target.value.slice(0, 500))}
+                                        onKeyDown={(e) => {
+                                            if (e.key === 'Enter' && !e.shiftKey) {
+                                                e.preventDefault();
+                                                if (myRating !== null && !submittingRating && detailsStore) {
+                                                    submitRating(detailsStore, myRating);
+                                                }
+                                            }
+                                        }}
+                                        rows={2}
+                                        maxLength={500}
+                                        disabled={submittingRating}
+                                        placeholder="Cảm nhận của bạn về cửa hàng (nhớ chọn số sao trước nhé) "
+                                        className="mt-2 w-full resize-none rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 px-2.5 py-2 text-xs text-gray-800 dark:text-gray-200 placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
+                                    />
+                                    <div className="mt-2 flex justify-end">
+                                        <button
+                                            type="button"
+                                            disabled={submittingRating || myRating === null}
+                                            onClick={() => {
+                                                if (detailsStore && myRating !== null) {
+                                                    submitRating(detailsStore, myRating);
+                                                }
+                                            }}
+                                            className="rounded-lg bg-blue-600 px-4 py-1.5 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
+                                        >
+                                            {submittingRating ? 'Đang gửi...' : 'Đăng bình luận'}
+                                        </button>
+                                    </div>
+                                </>
+                            ) : (
+                                <button
+                                    type="button"
+                                    onClick={() => requestAuth()}
+                                    className="w-full rounded-lg border border-dashed border-gray-300 dark:border-gray-600 px-3 py-2.5 text-xs font-medium text-gray-500 dark:text-gray-400 hover:border-blue-400 hover:text-blue-600 dark:hover:text-blue-400"
+                                >
+                                    Đăng nhập để đánh giá và bình luận
+                                </button>
                             )}
                         </div>
 
