@@ -8,6 +8,7 @@ import { MapPin, Pencil, RotateCcw, Trash2, X } from 'lucide-react';
 import MapView from '@/components/MapView';
 import { toast } from '@/components/Toast';
 import { useApp } from '@/components/app-provider';
+import { useEscapeKey } from '@/lib/use-escape';
 import { StoreRequestRecord, getRoleLabel, hasPermission } from '@/lib/auth-system';
 import { Store, UserLocation } from '@/types/store';
 
@@ -86,6 +87,10 @@ export default function AdminPage() {
     const [editAmenities, setEditAmenities] = useState<string[]>([]);
     const [editLocation, setEditLocation] = useState<UserLocation | null>(null);
     const [savingStore, setSavingStore] = useState(false);
+
+    // Bấm Esc: đóng modal sửa cửa hàng (hoặc hủy trạng thái "bấm lần nữa để xóa").
+    useEscapeKey(() => setEditingStore(null), editingStore !== null);
+    useEscapeKey(() => setConfirmDeleteKey(null), editingStore === null && confirmDeleteKey !== null);
 
     const isAdmin = !!currentUser && currentUser.role === 'admin';
 

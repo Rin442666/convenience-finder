@@ -1,11 +1,11 @@
 'use client';
 
 import { useState, useEffect, useRef, useCallback, useMemo, useSyncExternalStore } from 'react';
-import { MapPin, Star, Navigation, User, X, SearchX, Heart, Clock, Crosshair, Sun, Moon, SlidersHorizontal, ChevronDown } from 'lucide-react';
+import { MapPin, Star, Navigation, X, SearchX, Heart, Clock, Crosshair, SlidersHorizontal, ChevronDown } from 'lucide-react';
 import MapView from '@/components/MapView';
-import ToastHost, { toast } from '@/components/Toast';
+import { toast } from '@/components/Toast';
 import { useApp } from '@/components/app-provider';
-import { AppUser, StoreRequestRecord, getRoleLabel, hasPermission } from '@/lib/auth-system';
+import { useEscapeKey } from '@/lib/use-escape';
 import { Store, UserLocation } from '@/types/store';
 
 const fallbackBrandOptions = [
@@ -206,6 +206,10 @@ export default function Home() {
     const [loadingReviews, setLoadingReviews] = useState<boolean>(false);
     const [hoverStars, setHoverStars] = useState<number | null>(null);
     const [submittingRating, setSubmittingRating] = useState(false);
+
+    // Bấm Esc: đóng popover chấm sao trước, rồi đến modal chi tiết cửa hàng.
+    useEscapeKey(() => setRatingPickerStoreId(null), ratingPickerStoreId !== null);
+    useEscapeKey(() => setDetailsStore(null), detailsStore !== null && ratingPickerStoreId === null);
 
     // Đồng bộ favorites + reset state đánh giá mỗi khi user đổi
     // (đăng nhập/đăng xuất/đổi tài khoản). Trước đây refreshFavorites

@@ -8,6 +8,7 @@ import { X } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { toast } from '@/components/Toast';
 import { useApp } from '@/components/app-provider';
+import { useEscapeKey } from '@/lib/use-escape';
 
 type AuthMode = 'login' | 'register';
 
@@ -23,13 +24,14 @@ export default function AuthModal({ open, onClose }: { open: boolean; onClose: (
     const [registerForm, setRegisterForm] = useState({ fullName: '', email: '', username: '', password: '', confirmPassword: '' });
     const [submitting, setSubmitting] = useState(false);
 
-    if (!open) {
-        return null;
-    }
-
     const close = () => {
         onClose();
     };
+    useEscapeKey(close, open);
+
+    if (!open) {
+        return null;
+    }
 
     const handleLoginSubmit = async (e: React.FormEvent) => {
         e.preventDefault();

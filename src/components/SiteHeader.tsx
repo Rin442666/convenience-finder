@@ -8,6 +8,7 @@ import { usePathname, useRouter } from 'next/navigation';
 import { MapPin, Menu, Moon, Sun, User } from 'lucide-react';
 import { useApp } from '@/components/app-provider';
 import AuthModal from '@/components/AuthModal';
+import { useEscapeKey } from '@/lib/use-escape';
 
 export default function SiteHeader() {
     const { currentUser, darkMode, toggleDarkMode, logout, authRequestKey } = useApp();
@@ -17,6 +18,9 @@ export default function SiteHeader() {
     const [authModalOpen, setAuthModalOpen] = useState(false);
     const accountMenuRef = useRef<HTMLDivElement>(null);
     const lastAuthRequestRef = useRef(0);
+
+    // Bấm Esc thì đóng menu tài khoản.
+    useEscapeKey(() => setAccountMenuOpen(false), accountMenuOpen);
 
     // Trang con (vd: trang chính) có thể yêu cầu mở modal đăng nhập
     // qua requestAuth() — vd: bấm đánh giá lúc chưa đăng nhập.
