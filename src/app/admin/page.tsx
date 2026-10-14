@@ -9,8 +9,10 @@ import { useApp } from '@/components/app-provider';
 import { useEscapeKey } from '@/lib/use-escape';
 import { StoreRequestRecord, getRoleLabel, hasPermission } from '@/lib/auth-system';
 import { Store, UserLocation } from '@/types/store';
+import StatsTab from '@/components/admin/StatsTab';
+import type { AdminStats } from '@/components/admin/StatsTab';
 
-type AdminTab = 'users' | 'reviews' | 'catalog' | 'requests';
+type AdminTab = 'stats' | 'users' | 'reviews' | 'catalog' | 'requests';
 
 type AdminUserItem = {
     id: string;
@@ -56,8 +58,9 @@ export default function AdminPage() {
     const { currentUser, authToken, authReady } = useApp();
     const router = useRouter();
 
-    const [adminTab, setAdminTab] = useState<AdminTab>('users');
+    const [adminTab, setAdminTab] = useState<AdminTab>('stats');
     const [adminLoadedTab, setAdminLoadedTab] = useState<AdminTab | null>(null);
+    const [adminStats, setAdminStats] = useState<AdminStats | null>(null);
     const [adminUsers, setAdminUsers] = useState<AdminUserItem[]>([]);
     const [adminReviews, setAdminReviews] = useState<AdminReviewItem[]>([]);
     const [adminBrands, setAdminBrands] = useState<CatalogItem[]>([]);
@@ -173,6 +176,22 @@ export default function AdminPage() {
         }
     };
 
+    const loadAdminStats = async () => {
+        try {
+            const res = await fetch('/api/admin/stats', { headers: adminHeaders() });
+            const data = await res.json();
+            if (!res.ok) {
+                toast(data.message || 'Không thể tải số liệu thống kê.', 'error');
+                return;
+            }
+            setAdminStats(data);
+        } catch {
+            toast('Không thể kết nối máy chủ.', 'error');
+        } finally {
+            setAdminLoadedTab('stats');
+        }
+    };
+
     const loadPendingRequests = async () => {
         try {
             const res = await fetch('/api/store-requests', { headers: adminHeaders() });
@@ -198,6 +217,8 @@ export default function AdminPage() {
                 await loadAdminReviews();
             } else if (adminTab === 'catalog') {
                 await loadAdminCatalog();
+            } else if (adminTab === 'stats') {
+                await loadAdminStats();
             } else {
                 await loadPendingRequests();
             }
@@ -510,6 +531,7 @@ export default function AdminPage() {
     const selectedMapStore = mapStores.find((s) => s.id === selectedStoreId) || null;
 
     const tabs: { id: AdminTab; label: string }[] = [
+        { id: 'stats', label: 'Thống kê' },
         { id: 'users', label: 'Người dùng' },
         { id: 'reviews', label: 'Đánh giá' },
         { id: 'catalog', label: 'Danh mục' },
@@ -543,6 +565,10 @@ export default function AdminPage() {
 
                 {adminLoadedTab !== adminTab && (
                     <p className="mt-4 text-sm text-gray-500 dark:text-gray-400">Đang tải...</p>
+                )}
+
+                {adminLoadedTab === adminTab && adminTab === 'stats' && (
+                    <StatsTab stats={adminStats} />
                 )}
 
                 {adminLoadedTab === adminTab && adminTab === 'users' && (
