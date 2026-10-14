@@ -9,11 +9,12 @@ import AuthModal from '@/components/AuthModal';
 import { useEscapeKey } from '@/lib/use-escape';
 
 export default function SiteHeader() {
-    const { currentUser, darkMode, toggleDarkMode, logout, authRequestKey } = useApp();
+    const { currentUser, authToken, darkMode, toggleDarkMode, logout, authRequestKey } = useApp();
     const pathname = usePathname();
     const router = useRouter();
     const [accountMenuOpen, setAccountMenuOpen] = useState(false);
     const [authModalOpen, setAuthModalOpen] = useState(false);
+    const [pendingRequestCount, setPendingRequestCount] = useState(0);
     const accountMenuRef = useRef<HTMLDivElement>(null);
     const lastAuthRequestRef = useRef(0);
 
@@ -41,6 +42,33 @@ export default function SiteHeader() {
 
     const navItems = [{ href: '/', label: 'Trang chủ' }];
     const isAdmin = currentUser?.role === 'admin';
+
+    useEffect(() => {
+        if (!isAdmin || !authToken) {
+            return;
+        }
+        let cancelled = false;
+        const fetchPendingCount = async () => {
+            try {
+                const res = await fetch('/api/admin/requests/pending-count', {
+                    headers: { Authorization: `Bearer ${authToken}` },
+                });
+                if (!res.ok || cancelled) {
+                    return;
+                }
+                const data = await res.json();
+                setPendingRequestCount(Number(data.count) || 0);
+            } catch {
+                /* Bỏ qua lỗi poll ngầm, lần sau thử lại. */
+            }
+        };
+        fetchPendingCount();
+        const timer = setInterval(fetchPendingCount, 60000);
+        return () => {
+            cancelled = true;
+            clearInterval(timer);
+        };
+    }, [isAdmin, authToken]);
 
     const handleLogout = () => {
         logout();
@@ -104,8 +132,16 @@ export default function SiteHeader() {
                                     type="button"
                                     onClick={() => setAccountMenuOpen((prev) => !prev)}
                                     aria-label="Mở menu tài khoản"
-                                    className="flex items-center gap-2 rounded-full border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 shadow-sm hover:bg-gray-50 dark:hover:bg-gray-800"
+                                    className="relative flex items-center gap-2 rounded-full border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 shadow-sm hover:bg-gray-50 dark:hover:bg-gray-800"
                                 >
+                                    {isAdmin && pendingRequestCount > 0 && (
+                                        <span
+                                            title={`${pendingRequestCount} yêu cầu chờ duyệt`}
+                                            className="absolute -top-1.5 -right-1.5 flex h-5 min-w-5 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold text-white ring-2 ring-white dark:ring-gray-900"
+                                        >
+                                            {pendingRequestCount > 9 ? '9+' : pendingRequestCount}
+                                        </span>
+                                    )}
                                     <span className="flex h-9 w-9 items-center justify-center rounded-full bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300">
                                         <User className="h-5 w-5" />
                                     </span>
@@ -137,9 +173,15 @@ export default function SiteHeader() {
                                             <Link
                                                 href="/admin"
                                                 onClick={() => setAccountMenuOpen(false)}
-                                                className={menuLinkClass}
+                                                className="flex w-full items-center justify-between gap-2 rounded-lg px-3 py-2 text-left text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800"
                                             >
-                                                Quản trị hệ thống
+                                                <span>Quản trị hệ thống</span>
+                                                {pendingRequestCount > 0 && (
+                                                    <span className="flex items-center gap-1 rounded-full bg-red-100 dark:bg-red-950 px-2 py-0.5 text-[11px] font-bold text-red-600 dark:text-red-400">
+                                                        <span className="h-1.5 w-1.5 rounded-full bg-red-500" />
+                                                        {pendingRequestCount} mới
+                                                    </span>
+                                                )}
                                             </Link>
                                         )}
                                         <button

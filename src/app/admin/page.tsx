@@ -192,7 +192,7 @@ export default function AdminPage() {
         }
     };
 
-    const loadPendingRequests = async () => {
+    const loadPendingRequests = async (markLoaded = true) => {
         try {
             const res = await fetch('/api/store-requests', { headers: adminHeaders() });
             const data = await res.json();
@@ -202,7 +202,9 @@ export default function AdminPage() {
         } catch (error) {
             console.error('Lỗi tải yêu cầu cửa hàng:', error);
         } finally {
-            setAdminLoadedTab('requests');
+            if (markLoaded) {
+                setAdminLoadedTab('requests');
+            }
         }
     };
 
@@ -227,6 +229,19 @@ export default function AdminPage() {
         fetchCurrentAdminTab();
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [authReady, isAdmin, adminTab]);
+
+    useEffect(() => {
+        if (!authReady || !isAdmin) {
+            return;
+        }
+        async function refreshPendingRequests() {
+            await loadPendingRequests(false);
+        }
+        refreshPendingRequests();
+        const timer = setInterval(refreshPendingRequests, 60000);
+        return () => clearInterval(timer);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [authReady, isAdmin]);
 
     const loadAdminStores = async () => {
         try {
