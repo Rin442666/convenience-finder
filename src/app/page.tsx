@@ -1,11 +1,12 @@
 'use client';
 
 import { useState, useEffect, useRef, useCallback, useMemo, useSyncExternalStore } from 'react';
-import { MapPin, Star, Navigation, X, SearchX, Heart, Clock, Crosshair, SlidersHorizontal, ChevronDown } from 'lucide-react';
+import { MapPin, Star, Navigation, X, SearchX, Heart, Clock, Crosshair, SlidersHorizontal, ChevronDown, Mic } from 'lucide-react';
 import MapView from '@/components/MapView';
 import { toast } from '@/components/Toast';
 import { useApp } from '@/components/app-provider';
 import { useEscapeKey } from '@/lib/use-escape';
+import { useVoiceInput } from '@/lib/use-voice-input';
 import { Store, UserLocation } from '@/types/store';
 
 const fallbackBrandOptions = [
@@ -114,6 +115,13 @@ export default function Home() {
         selectedAmenities.length +
         (openOnly ? 1 : 0);
     const [draftSearchTerm, setDraftSearchTerm] = useState<string>('');
+    const { supported: voiceSupported, listening: voiceListening, toggle: toggleVoice } = useVoiceInput(
+        (transcript) => {
+            setDraftSearchTerm(transcript);
+            setSearchTerm(transcript);
+        },
+        (message) => toast(message, 'error')
+    );
     const [draftRadius, setDraftRadius] = useState<number>(1000);
     const [draftSelectedBrand, setDraftSelectedBrand] = useState<string>('all');
     const [draftSelectedAmenities, setDraftSelectedAmenities] = useState<string[]>([]);
@@ -479,12 +487,29 @@ export default function Home() {
                 <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-[minmax(0,1fr)_130px_160px_180px_160px]">
                     <div>
                         <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Tìm kiếm</label>
-                        <input
-                            value={draftSearchTerm}
-                            onChange={(e) => setDraftSearchTerm(e.target.value)}
-                            placeholder="Tên cửa hàng hoặc địa chỉ"
-                            className="w-full border border-gray-200 dark:border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-800 dark:text-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-200 dark:focus:ring-blue-800"
-                        />
+                        <div className="relative">
+                            <input
+                                value={draftSearchTerm}
+                                onChange={(e) => setDraftSearchTerm(e.target.value)}
+                                placeholder="Tên cửa hàng, địa chỉ... (bấm mic để nói)"
+                                className="w-full border border-gray-200 dark:border-gray-700 rounded-lg px-3 py-2 pr-10 text-sm text-gray-800 dark:text-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-200 dark:focus:ring-blue-800"
+                            />
+                            {voiceSupported && (
+                                <button
+                                    type="button"
+                                    onClick={toggleVoice}
+                                    title={voiceListening ? 'Dừng nghe' : 'Thử nói tên cửa hàng, VD: "Circle K"'}
+                                    aria-label="Tìm kiếm bằng giọng nói"
+                                    className={`absolute right-2 top-1/2 -translate-y-1/2 rounded-full p-1.5 transition ${
+                                        voiceListening
+                                            ? 'bg-red-100 text-red-600 dark:bg-red-950 dark:text-red-400 animate-pulse'
+                                            : 'text-gray-400 hover:text-blue-600 dark:text-gray-500 dark:hover:text-blue-400'
+                                    }`}
+                                >
+                                    <Mic className="h-4 w-4" />
+                                </button>
+                            )}
+                        </div>
                     </div>
 
                     <div>
