@@ -880,6 +880,7 @@ export default function AdminPage() {
                             center={DEFAULT_CENTER}
                             stores={mapStores}
                             selectedStore={selectedMapStore}
+                            markerMode="dot"
                         />
                     </div>
                     <div className="max-h-[380px] overflow-y-auto space-y-2 pr-1">

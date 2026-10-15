@@ -744,6 +744,7 @@ export default function Home() {
                             selectedStore={selectedStore}
                             pickingEnabled={pickingLocation}
                             onMapClick={handleMapClick}
+                            markerMode="auto"
                         />
                     </div>
 

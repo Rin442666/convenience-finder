@@ -25,6 +25,15 @@ const fallbackAmenityOptions: CatalogItem[] = [
     { id: 'overnight', name: 'Cho phép qua đêm' },
 ];
 
+const fallbackBrandOptions: CatalogItem[] = [
+    { id: 'circle-k', name: 'Circle K' },
+    { id: 'winmart', name: 'WinMart+' },
+    { id: 'gs25', name: 'GS25' },
+    { id: 'familymart', name: 'FamilyMart' },
+    { id: '7-eleven', name: '7-Eleven' },
+    { id: 'other', name: 'Khác' },
+];
+
 const inputClass =
     'border border-gray-200 dark:border-gray-700 rounded-xl px-3 py-2.5 text-sm text-gray-900 dark:text-gray-100 bg-white dark:bg-gray-900 w-full outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-200 dark:focus:ring-blue-800';
 
@@ -37,6 +46,7 @@ export default function YeuCauPage() {
     const [notes, setNotes] = useState('');
     const [picked, setPicked] = useState<UserLocation | null>(null);
     const [amenityOptions, setAmenityOptions] = useState<CatalogItem[]>(fallbackAmenityOptions);
+    const [brandOptions, setBrandOptions] = useState<CatalogItem[]>(fallbackBrandOptions);
     const [selectedAmenities, setSelectedAmenities] = useState<string[]>(['wifi', 'parking']);
     const [sending, setSending] = useState(false);
 
@@ -52,6 +62,13 @@ export default function YeuCauPage() {
             .then((data) => {
                 if (Array.isArray(data?.amenities) && data.amenities.length > 0) {
                     setAmenityOptions(data.amenities);
+                }
+                if (Array.isArray(data?.brands) && data.brands.length > 0) {
+                    setBrandOptions(data.brands);
+                    /* Giữ đúng thương hiệu đã chọn, nếu không còn trong danh sách thì lấy cái đầu. */
+                    setBrandName((prev) =>
+                        data.brands.some((b: CatalogItem) => b.name === prev) ? prev : data.brands[0].name
+                    );
                 }
             })
             .catch(() => {});
@@ -141,12 +158,18 @@ export default function YeuCauPage() {
                     className={inputClass}
                     placeholder="Tên cửa hàng"
                 />
-                <input
+                <select
                     value={brandName}
                     onChange={(e) => setBrandName(e.target.value)}
                     className={inputClass}
-                    placeholder="Thương hiệu"
-                />
+                    aria-label="Thương hiệu"
+                >
+                    {brandOptions.map((b) => (
+                        <option key={b.id} value={b.name}>
+                            {b.name}
+                        </option>
+                    ))}
+                </select>
                 <input
                     value={address}
                     onChange={(e) => setAddress(e.target.value)}

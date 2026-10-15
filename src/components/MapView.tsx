@@ -1,6 +1,6 @@
 ﻿'use client';
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Store, UserLocation } from '../types/store';
 
 interface MapViewProps {
@@ -10,6 +10,9 @@ interface MapViewProps {
   onMapMoveEnd?: (newCenter: UserLocation) => void;
   pickingEnabled?: boolean;
   onMapClick?: (location: UserLocation) => void;
+  /* Kiểu marker cửa hàng: 'pin' (ghim), 'dot' (chấm tròn),
+     'auto' (zoom out → chấm, zoom in ≥15 → ghim). */
+  markerMode?: 'pin' | 'dot' | 'auto';
 }
 
 /* Escape HTML để chống XSS khi tên/địa chỉ cửa hàng chứa ký tự đặc biệt
@@ -23,11 +26,14 @@ function escapeHtml(value: string): string {
     .replace(/'/g, '&#39;');
 }
 
-export default function MapView({ center, stores, selectedStore, onMapMoveEnd, pickingEnabled, onMapClick }: MapViewProps) {
+export default function MapView({ center, stores, selectedStore, onMapMoveEnd, pickingEnabled, onMapClick, markerMode = 'pin' }: MapViewProps) {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<any>(null);
   const routeLayerRef = useRef<any>(null);
   const markersGroupRef = useRef<any>(null);
+  /* Mức zoom hiện tại — chỉ dùng cho markerMode='auto'. */
+  const [mapZoom, setMapZoom] = useState(14);
+  const useDots = markerMode === 'dot' || (markerMode === 'auto' && mapZoom < 15);
   const prevCenterRef = useRef<UserLocation | null>(null);
   const prevSelectedIdRef = useRef<string | null>(null);
   /* Ref cho callback chọn vị trí: bản đồ chỉ tạo 1 lần nên dùng ref để luôn
@@ -70,6 +76,10 @@ export default function MapView({ center, stores, selectedStore, onMapMoveEnd, p
           if (pickingEnabledRef.current && onMapClickRef.current) {
             onMapClickRef.current({ lat: event.latlng.lat, lng: event.latlng.lng });
           }
+        });
+
+        map.on('zoomend', () => {
+          setMapZoom(map.getZoom());
         });
 
         mapInstanceRef.current = map;
@@ -119,14 +129,29 @@ export default function MapView({ center, stores, selectedStore, onMapMoveEnd, p
 
       stores.forEach((store) => {
         if (store.lat && store.lng) {
-          window.L.marker([store.lat, store.lng], { icon: storeIcon })
-            .addTo(markersGroupRef.current)
-            .bindPopup(`
+          const popupHtml = `
               <div style="font-family: sans-serif;">
                 <strong>${escapeHtml(store.name)}</strong><br/>
                 <small>${escapeHtml(store.address)}</small>
               </div>
-            `);
+            `;
+          if (useDots) {
+            /* Chấm tròn nhẹ, nhanh khi có hàng trăm điểm. */
+            const isSelected = selectedStore?.id === store.id;
+            window.L.circleMarker([store.lat, store.lng], {
+              radius: isSelected ? 8 : 5,
+              color: isSelected ? '#1d4ed8' : '#b91c1c',
+              weight: 1.5,
+              fillColor: isSelected ? '#3b82f6' : '#ef4444',
+              fillOpacity: 0.9,
+            })
+              .addTo(markersGroupRef.current)
+              .bindPopup(popupHtml);
+          } else {
+            window.L.marker([store.lat, store.lng], { icon: storeIcon })
+              .addTo(markersGroupRef.current)
+              .bindPopup(popupHtml);
+          }
         }
       });
 
@@ -203,7 +228,7 @@ export default function MapView({ center, stores, selectedStore, onMapMoveEnd, p
     script.async = true;
     script.onload = () => initMap();
     document.head.appendChild(script);
-  }, [center, stores, selectedStore]);
+  }, [center, stores, selectedStore, useDots]);
 
   return <div ref={mapContainerRef} className="w-full h-full min-h-[500px] rounded-xl z-0" />;
 }
