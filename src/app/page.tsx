@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef, useCallback, useMemo, useSyncExternalStore } from 'react';
-import { MapPin, Star, Navigation, X, SearchX, Heart, Clock, Crosshair, SlidersHorizontal, ChevronDown, Mic } from 'lucide-react';
+import { MapPin, Star, Navigation, X, SearchX, Heart, Clock, Crosshair, SlidersHorizontal, ChevronDown, Mic, Footprints, Bus } from 'lucide-react';
 import MapView from '@/components/MapView';
 import { toast } from '@/components/Toast';
 import { useApp } from '@/components/app-provider';
@@ -150,6 +150,8 @@ export default function Home() {
     const [pickingLocation, setPickingLocation] = useState<boolean>(false);
     const [pickedLocation, setPickedLocation] = useState<boolean>(false);
     const [detailsStore, setDetailsStore] = useState<Store | null>(null);
+    /* Cửa hàng đang mở popup chọn phương tiện để chỉ đường. */
+    const [directionsStore, setDirectionsStore] = useState<Store | null>(null);
     /* Danh sách yêu thích của user đang đăng nhập. Khởi tạo lười từ
        localStorage theo session đã lưu; đổi user (login/logout/register)
        thì cập nhật ngay trong handler, không dùng effect để tránh
@@ -191,6 +193,7 @@ export default function Home() {
     const [submittingRating, setSubmittingRating] = useState(false);
 
     useEscapeKey(() => setDetailsStore(null), detailsStore !== null);
+    useEscapeKey(() => setDirectionsStore(null), directionsStore !== null);
 
     /* Đồng bộ favorites + reset state đánh giá mỗi khi user đổi
        (đăng nhập/đăng xuất/đổi tài khoản).
@@ -496,16 +499,17 @@ export default function Home() {
         }
     };
 
-    const openDirections = (store: Store) => {
-        setSelectedStore(store);
-
-        const googleMapsUrl = `https://www.google.com/maps/dir/?api=1&origin=${userLocation.lat},${userLocation.lng}&destination=${store.lat},${store.lng}`;
+    /* Mở Google Maps chỉ đường theo phương tiện người dùng chọn.
+       Google Maps URL không có travelmode xe máy → dùng driving (gần nhất). */
+    const openGoogleMapsDirections = (store: Store, travelmode: 'walking' | 'driving' | 'transit') => {
+        const googleMapsUrl = `https://www.google.com/maps/dir/?api=1&origin=${userLocation.lat},${userLocation.lng}&destination=${store.lat},${store.lng}&travelmode=${travelmode}`;
         window.open(googleMapsUrl, '_blank');
+        setDirectionsStore(null);
     };
 
     const handleDirections = (e: React.MouseEvent, store: Store) => {
         e.stopPropagation();
-        openDirections(store);
+        setDirectionsStore(store);
     };
 
     const openStoreCount = stores.filter((store) => store.isOpen || store.is24h).length;
@@ -1153,7 +1157,7 @@ export default function Home() {
                             <button
                                 type="button"
                                 onClick={() => {
-                                    openDirections(detailsStore);
+                                    setDirectionsStore(detailsStore);
                                     setDetailsStore(null);
                                 }}
                                 className="flex flex-1 items-center justify-center gap-1.5 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-700"
@@ -1175,6 +1179,67 @@ export default function Home() {
                                 {favoriteIds.includes(detailsStore.id) ? 'Đã yêu thích' : 'Yêu thích'}
                             </button>
                         </div>
+                    </div>
+                </div>
+            )}
+
+            {directionsStore && (
+                <div
+                    className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4"
+                    onClick={() => setDirectionsStore(null)}
+                >
+                    <div
+                        onClick={(e) => e.stopPropagation()}
+                        className="w-full max-w-xs rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 p-5 shadow-2xl"
+                    >
+                        <h3 className="text-base font-bold text-gray-900 dark:text-gray-100">
+                            Chỉ đường
+                        </h3>
+                        <p className="mt-1 truncate text-xs text-gray-500 dark:text-gray-400">
+                            {directionsStore.name}
+                        </p>
+                        <div className="mt-4 flex overflow-hidden rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800">
+                            <button
+                                type="button"
+                                onClick={() => openGoogleMapsDirections(directionsStore, 'walking')}
+                                className="flex flex-1 flex-col items-center gap-1.5 px-2 py-3 text-xs font-semibold text-gray-600 dark:text-gray-400 transition hover:bg-gray-100 dark:hover:bg-gray-700 active:bg-blue-600 active:text-white"
+                            >
+                                <Footprints className="h-5 w-5" />
+                                Đi bộ
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => openGoogleMapsDirections(directionsStore, 'driving')}
+                                className="flex flex-1 flex-col items-center gap-1.5 border-x border-gray-200 dark:border-gray-700 px-2 py-3 text-xs font-semibold text-gray-600 dark:text-gray-400 transition hover:bg-gray-100 dark:hover:bg-gray-700 active:bg-blue-600 active:text-white"
+                            >
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5" aria-hidden="true">
+                                    <path d="M5 17h14" />
+                                    <circle cx="7" cy="17" r="3" />
+                                    <circle cx="17" cy="17" r="3" />
+                                    <path d="M7 17l3-7h4l3 7" />
+                                    <path d="M10 10l1.5-4h2L15 10" />
+                                </svg>
+                                Xe máy
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => openGoogleMapsDirections(directionsStore, 'transit')}
+                                className="flex flex-1 flex-col items-center gap-1.5 px-2 py-3 text-xs font-semibold text-gray-600 dark:text-gray-400 transition hover:bg-gray-100 dark:hover:bg-gray-700 active:bg-blue-600 active:text-white"
+                            >
+                                <Bus className="h-5 w-5" />
+                                Xe buýt
+                            </button>
+                        </div>
+                        <p className="mt-2.5 text-center text-[11px] text-gray-400 dark:text-gray-500">
+                            Mở trong Google Maps
+                        </p>
+                        <button
+                            type="button"
+                            onClick={() => setDirectionsStore(null)}
+                            className="mt-1.5 w-full rounded-xl px-4 py-2 text-sm font-medium text-gray-500 dark:text-gray-400 transition hover:bg-gray-100 dark:hover:bg-gray-800"
+                        >
+                            Hủy
+                        </button>
                     </div>
                 </div>
             )}

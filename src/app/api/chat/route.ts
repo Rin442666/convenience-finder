@@ -1,6 +1,5 @@
 import { NextResponse } from 'next/server';
 import { brands, queryStores, type StoreFilters, type StoreRecord } from '@/lib/store-db';
-import { applyRoadDistancesTop } from '@/lib/osrm';
 import {
     detectIntent,
     formatDistance,
@@ -177,20 +176,14 @@ export async function POST(request: Request) {
                 });
             }
             const desc = describeFind(intent);
-            /* Khoảng cách đường bộ (OSRM) cho khớp với con số ngoài danh sách;
-               sắp xếp lại theo đường bộ cho đúng thứ tự "gần nhất". */
-            let withRoads = await applyRoadDistancesTop(top, center);
-            if (!intent.topRated) {
-                withRoads = [...withRoads].sort(
-                    (a, b) => (a.distanceMeters ?? 0) - (b.distanceMeters ?? 0)
-                );
-            }
+            /* Khoảng cách đường chim bay — trung thực vì quãng đường thực tế
+               còn phụ thuộc phương tiện di chuyển của người dùng. */
             return NextResponse.json<ChatResponse>({
-                reply: `Tìm thấy ${withRoads.length} cửa hàng ${desc}:`,
-                stores: withRoads.map((s) => toChatStore(s, hasLocation ? center : null)),
+                reply: `Tìm thấy ${top.length} cửa hàng ${desc}:`,
+                stores: top.map((s) => toChatStore(s, hasLocation ? center : null)),
                 suggestions: FIND_SUGGESTIONS,
                 mapAction: {
-                    label: `Hiện ${withRoads.length} cửa hàng lên bản đồ`,
+                    label: `Hiện ${top.length} cửa hàng lên bản đồ`,
                     brandId: intent.brandId,
                     amenityIds: intent.amenityIds,
                     openOnly: intent.openOnly,

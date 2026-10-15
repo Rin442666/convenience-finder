@@ -1,7 +1,7 @@
 
 export type LatLng = { lat: number; lng: number };
 
-const OSRM_TABLE_URL = 'https://router.project-osrm.org/table/v1/driving';
+const OSRM_TABLE_URL = 'https://router.project-osrm.org/table/v1/foot';
 // OSRM demo server miễn phí nhưng giới hạn ~100 tọa độ/request.
 const MAX_COORDS_PER_REQUEST = 99;
 /* Chỉ tính đường bộ cho N cửa hàng gần nhất (theo đường chim bay) —

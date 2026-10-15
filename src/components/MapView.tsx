@@ -30,8 +30,6 @@ export default function MapView({ center, stores, selectedStore, onMapMoveEnd, p
   const markersGroupRef = useRef<any>(null);
   const prevCenterRef = useRef<UserLocation | null>(null);
   const prevSelectedIdRef = useRef<string | null>(null);
-  // Đánh số request vẽ đường đi để response cũ không ghi đè (race condition).
-  const routeRequestIdRef = useRef<number>(0);
   /* Ref cho callback chọn vị trí: bản đồ chỉ tạo 1 lần nên dùng ref để luôn
      gọi callback mới nhất mà không cần khởi tạo lại map. Gán trong effect
      (không gán trực tiếp lúc render) để đúng quy tắc react-hooks/refs. */
@@ -154,8 +152,9 @@ export default function MapView({ center, stores, selectedStore, onMapMoveEnd, p
 
         routeLayerRef.current = window.L.polyline(leafletLatLngs, {
           color: '#2563eb',
-          weight: 5,
-          opacity: 0.8,
+          weight: 4,
+          opacity: 0.9,
+          dashArray: '10, 8',
         }).addTo(map);
 
         if (!fitBoundsToRoute) {
@@ -170,39 +169,18 @@ export default function MapView({ center, stores, selectedStore, onMapMoveEnd, p
         }
       };
 
+      /* Đường nối nét đứt từ vị trí người dùng tới cửa hàng đã chọn —
+         minh họa trực quan (độ dài đúng bằng khoảng cách đường chim bay
+         hiển thị trên thẻ). Chỉ đường chi tiết để Google Maps lo khi bấm
+         nút "Chỉ đường". */
       if (selectedStore && Number.isFinite(selectedStore.lat) && Number.isFinite(selectedStore.lng) && Number.isFinite(center.lat) && Number.isFinite(center.lng)) {
-        const directRoute: [number, number][] = [
-          [center.lat, center.lng],
-          [selectedStore.lat, selectedStore.lng],
-        ];
-
-        const osrmUrl = `https://router.project-osrm.org/route/v1/driving/${center.lng},${center.lat};${selectedStore.lng},${selectedStore.lat}?overview=full&geometries=geojson`;
-        const routeRequestId = ++routeRequestIdRef.current;
-        const shouldFitBounds = selectionChanged || centerChanged;
-
-        fetch(osrmUrl)
-          .then((res) => res.json())
-          .then((data) => {
-            // Bỏ qua response của request cũ (người dùng đã chọn cửa hàng khác).
-            if (routeRequestIdRef.current !== routeRequestId) {
-              return;
-            }
-            const coordinates = data?.routes?.[0]?.geometry?.coordinates;
-
-            if (Array.isArray(coordinates) && coordinates.length > 0) {
-              const latLngs = coordinates.map(([lng, lat]: [number, number]) => [lat, lng] as [number, number]);
-              drawRoute(latLngs, shouldFitBounds);
-              return;
-            }
-
-            drawRoute(directRoute, shouldFitBounds);
-          })
-          .catch(() => {
-            if (routeRequestIdRef.current !== routeRequestId) {
-              return;
-            }
-            drawRoute(directRoute, shouldFitBounds);
-          });
+        drawRoute(
+          [
+            [center.lat, center.lng],
+            [selectedStore.lat, selectedStore.lng],
+          ],
+          selectionChanged || centerChanged
+        );
       } else if (centerChanged) {
         map.setView([center.lat, center.lng], 14);
       }

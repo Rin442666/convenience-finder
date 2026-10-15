@@ -1,5 +1,4 @@
 ﻿import { NextResponse } from 'next/server';
-import { applyRoadDistancesTop } from '@/lib/osrm';
 import {
   applyRatingFilterAndSort,
   getStoreCatalog,
@@ -145,11 +144,10 @@ export async function GET(request: Request) {
                     { sort, minRating }
                 );
 
-                /* Chỉ tính đường bộ cho 30 cửa hàng gần nhất (đường chim bay)
-                   để request OSRM nhẹ; rồi sắp xếp lại, cho khớp với số
-                   Google Maps báo khi bấm "Chỉ đường". */
+                /* Khoảng cách đường chim bay (haversine): trung thực vì quãng đường
+                   thực tế còn phụ thuộc phương tiện di chuyển của người dùng. */
                 const googleStores = applyRatingFilterAndSort(
-                    await applyRoadDistancesTop(stores, { lat, lng }),
+                    stores,
                     { sort, minRating }
                 ).slice(0, MAX_STORE_RESULTS);
 
@@ -178,7 +176,7 @@ export async function GET(request: Request) {
 
     if (dbCatalog && dbStores) {
         const roadStores = applyRatingFilterAndSort(
-            await applyRoadDistancesTop(dbStores, { lat, lng }),
+            dbStores,
             { sort, minRating }
         ).slice(0, MAX_STORE_RESULTS);
         return NextResponse.json({
@@ -202,7 +200,7 @@ export async function GET(request: Request) {
 
     const { brands, amenities } = await getStoreCatalog();
     const roadMockStores = applyRatingFilterAndSort(
-        await applyRoadDistancesTop(mockStores, { lat, lng }),
+        mockStores,
         { sort, minRating }
     ).slice(0, MAX_STORE_RESULTS);
 
