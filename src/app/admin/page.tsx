@@ -61,6 +61,8 @@ export default function AdminPage() {
     const [adminTab, setAdminTab] = useState<AdminTab>('stats');
     const [adminLoadedTab, setAdminLoadedTab] = useState<AdminTab | null>(null);
     const [adminStats, setAdminStats] = useState<AdminStats | null>(null);
+    /* Tab thống kê tải lỗi (thường do DB thoáng qua) → hiện nút Thử lại. */
+    const [statsLoadFailed, setStatsLoadFailed] = useState(false);
     const [adminUsers, setAdminUsers] = useState<AdminUserItem[]>([]);
     const [adminReviews, setAdminReviews] = useState<AdminReviewItem[]>([]);
     const [adminBrands, setAdminBrands] = useState<CatalogItem[]>([]);
@@ -176,17 +178,25 @@ export default function AdminPage() {
         }
     };
 
-    const loadAdminStats = async () => {
+    const loadAdminStats = async (retrying = false) => {
+        if (!retrying) {
+            setStatsLoadFailed(false);
+        }
         try {
             const res = await fetch('/api/admin/stats', { headers: adminHeaders() });
             const data = await res.json();
             if (!res.ok) {
-                toast(data.message || 'Không thể tải số liệu thống kê.', 'error');
-                return;
+                throw new Error(data.message || 'load failed');
             }
             setAdminStats(data);
         } catch {
-            toast('Không thể kết nối máy chủ.', 'error');
+            if (!retrying) {
+                /* Lỗi thoáng qua phía DB (vd: Neon cold start) — thử lại 1 lần. */
+                await new Promise((resolve) => setTimeout(resolve, 1500));
+                return loadAdminStats(true);
+            }
+            toast('Không thể tải số liệu thống kê.', 'error');
+            setStatsLoadFailed(true);
         } finally {
             setAdminLoadedTab('stats');
         }
@@ -583,7 +593,22 @@ export default function AdminPage() {
                 )}
 
                 {adminLoadedTab === adminTab && adminTab === 'stats' && (
-                    <StatsTab stats={adminStats} />
+                    statsLoadFailed && !adminStats ? (
+                        <div className="mt-4 text-center">
+                            <p className="text-sm text-gray-500 dark:text-gray-400">
+                                Không tải được số liệu thống kê.
+                            </p>
+                            <button
+                                type="button"
+                                onClick={() => loadAdminStats()}
+                                className="mt-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700"
+                            >
+                                Thử lại
+                            </button>
+                        </div>
+                    ) : (
+                        <StatsTab stats={adminStats} />
+                    )
                 )}
 
                 {adminLoadedTab === adminTab && adminTab === 'users' && (
@@ -710,51 +735,53 @@ export default function AdminPage() {
                                         const deleteKey = `${section.kind}:${item.id}`;
                                         const editingKey = `${section.kind}:${item.id}`;
                                         return (
-                                            <li key={item.id} className="flex items-center gap-2 rounded-lg bg-gray-50 dark:bg-gray-800 px-3 py-2">
-                                                <span className="text-xs text-gray-400 dark:text-gray-500 w-24 truncate">{item.id}</span>
+                                            <li key={item.id} className="rounded-lg bg-gray-50 dark:bg-gray-800 px-3 py-2">
                                                 {editingCatalogSlug === editingKey ? (
-                                                    <>
+                                                    <div className="flex items-center gap-2">
                                                         <input
                                                             value={editingCatalogName}
                                                             onChange={(e) => setEditingCatalogName(e.target.value)}
-                                                            className="flex-1 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-2 py-1 text-sm text-gray-800 dark:text-gray-200"
+                                                            className="min-w-0 flex-1 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-2 py-1 text-sm text-gray-800 dark:text-gray-200"
                                                         />
                                                         <button
                                                             type="button"
                                                             onClick={() => handleRenameCatalogItem(section.kind, item.id)}
-                                                            className="rounded-lg bg-blue-600 px-2 py-1 text-xs font-medium text-white hover:bg-blue-700"
+                                                            className="shrink-0 rounded-lg bg-blue-600 px-2 py-1 text-xs font-medium text-white hover:bg-blue-700"
                                                         >
                                                             Lưu
                                                         </button>
                                                         <button
                                                             type="button"
                                                             onClick={() => setEditingCatalogSlug(null)}
-                                                            className="rounded-lg px-2 py-1 text-xs text-gray-500 dark:text-gray-400 hover:text-gray-700"
+                                                            className="shrink-0 rounded-lg px-2 py-1 text-xs text-gray-500 dark:text-gray-400 hover:text-gray-700"
                                                         >
                                                             Hủy
                                                         </button>
-                                                    </>
+                                                    </div>
                                                 ) : (
                                                     <>
-                                                        <span className="flex-1 text-sm font-medium text-gray-800 dark:text-gray-200">{item.name}</span>
-                                                        <button
-                                                            type="button"
-                                                            onClick={() => {
-                                                                setEditingCatalogSlug(editingKey);
-                                                                setEditingCatalogName(item.name);
-                                                                setConfirmDeleteKey(null);
-                                                            }}
-                                                            className="rounded-lg px-2 py-1 text-xs text-blue-600 dark:text-blue-400 hover:underline"
-                                                        >
-                                                            Sửa
-                                                        </button>
-                                                        <button
-                                                            type="button"
-                                                            onClick={() => handleDeleteCatalogItem(section.kind, item.id)}
-                                                            className={`rounded-lg px-2 py-1 text-xs font-medium text-white ${confirmDeleteKey === deleteKey ? 'bg-red-700' : 'bg-red-600 hover:bg-red-700'}`}
-                                                        >
-                                                            {confirmDeleteKey === deleteKey ? 'Chắc chắn?' : 'Xóa'}
-                                                        </button>
+                                                        <div className="flex items-center gap-2">
+                                                            <span className="min-w-0 flex-1 truncate text-sm font-medium text-gray-800 dark:text-gray-200">{item.name}</span>
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => {
+                                                                    setEditingCatalogSlug(editingKey);
+                                                                    setEditingCatalogName(item.name);
+                                                                    setConfirmDeleteKey(null);
+                                                                }}
+                                                                className="shrink-0 rounded-lg px-2 py-1 text-xs text-blue-600 dark:text-blue-400 hover:underline"
+                                                            >
+                                                                Sửa
+                                                            </button>
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => handleDeleteCatalogItem(section.kind, item.id)}
+                                                                className={`shrink-0 rounded-lg px-2 py-1 text-xs font-medium text-white ${confirmDeleteKey === deleteKey ? 'bg-red-700' : 'bg-red-600 hover:bg-red-700'}`}
+                                                            >
+                                                                {confirmDeleteKey === deleteKey ? 'Chắc chắn?' : 'Xóa'}
+                                                            </button>
+                                                        </div>
+                                                        <p className="mt-0.5 truncate text-xs text-gray-400 dark:text-gray-500">{item.id}</p>
                                                     </>
                                                 )}
                                             </li>
