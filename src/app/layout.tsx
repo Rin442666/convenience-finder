@@ -4,6 +4,8 @@ import "./globals.css";
 import { AppProvider } from "@/components/app-provider";
 import SiteHeader from "@/components/SiteHeader";
 import ToastHost from "@/components/Toast";
+import ChatBot from "@/components/ChatBot";
+import Script from "next/script";
 
 const beVietnamPro = Be_Vietnam_Pro({
   subsets: ["vietnamese", "latin"],
@@ -32,7 +34,12 @@ export default function RootLayout({
     return (
         <html lang="vi" suppressHydrationWarning>
             <head>
-                <script dangerouslySetInnerHTML={{ __html: darkModeInitScript }} />
+                <Script
+    id="dark-mode-init"
+    strategy="beforeInteractive"
+    dangerouslySetInnerHTML={{ __html: darkModeInitScript }}
+/>
+
             </head>
             <body className={beVietnamPro.className} suppressHydrationWarning>
                 <AppProvider>
@@ -41,6 +48,7 @@ export default function RootLayout({
                         {children}
                     </main>
                     <ToastHost />
+                    <ChatBot />
                 </AppProvider>
             </body>
         </html>

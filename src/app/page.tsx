@@ -313,6 +313,54 @@ export default function Home() {
         fetchStores();
     }, [userLocation, radius, selectedBrand, selectedAmenities, openOnly, searchTerm, sortBy, minRating, storesRetryKey]);
 
+    /* Nhận kết quả tìm kiếm từ chatbot: áp bộ lọc rồi cuộn tới danh sách. */
+    useEffect(() => {
+        const applyDetail = (detail: {
+            search?: string;
+            brandId?: string;
+            amenityIds?: string[];
+            openOnly?: boolean;
+        }) => {
+            if (detail.search !== undefined) {
+                setDraftSearchTerm(detail.search);
+                setSearchTerm(detail.search);
+            }
+            if (detail.brandId !== undefined) {
+                setDraftSelectedBrand(detail.brandId);
+                setSelectedBrand(detail.brandId);
+            }
+            if (detail.amenityIds !== undefined) {
+                setDraftSelectedAmenities(detail.amenityIds);
+                setSelectedAmenities(detail.amenityIds);
+            }
+            if (detail.openOnly !== undefined) {
+                setDraftOpenOnly(detail.openOnly);
+                setOpenOnly(detail.openOnly);
+            }
+            requestAnimationFrame(() => {
+                document.getElementById('ket-qua')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            });
+        };
+        async function applyPendingBotSearch() {
+            const pending = sessionStorage.getItem('finder:bot-search');
+            if (!pending) {
+                return;
+            }
+            sessionStorage.removeItem('finder:bot-search');
+            try {
+                applyDetail(JSON.parse(pending));
+            } catch {
+                /* Bỏ qua payload hỏng. */
+            }
+        }
+        const handler = (event: Event) => {
+            applyDetail((event as CustomEvent).detail ?? {});
+        };
+        window.addEventListener('finder:bot-search', handler);
+        applyPendingBotSearch();
+        return () => window.removeEventListener('finder:bot-search', handler);
+    }, []);
+
     const toggleAmenity = (amenityId: string) => {
         setDraftSelectedAmenities((current) =>
             current.includes(amenityId)
@@ -656,7 +704,7 @@ export default function Home() {
                 )}
             </div>
 
-            <div className="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_340px] gap-6">
+            <div id="ket-qua" className="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_340px] gap-6 scroll-mt-24">
 
                 <div className="relative bg-white dark:bg-gray-900 rounded-2xl shadow-md p-2 h-[600px]">
                         <div className="absolute right-4 top-4 z-10 flex gap-2">

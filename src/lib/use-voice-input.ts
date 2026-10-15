@@ -1,12 +1,24 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 
 /* Hook nhập liệu bằng giọng nói dùng Web Speech API (tiếng Việt).
    Dùng chung cho ô tìm kiếm và chatbot sau này. */
 
 /* Speech-to-text thường dính dấu câu ở cuối ("Winmart.") làm tìm kiếm
    không khớp — cắt bỏ trước khi trả về. */
+
+function subscribeVoiceSupport(): () => void {
+    return () => {};
+}
+function getVoiceSupportSnapshot(): boolean {
+    return !!(window.SpeechRecognition || window.webkitSpeechRecognition);
+}
+function getVoiceSupportServerSnapshot(): boolean {
+    return false;
+}
+
+
 function cleanTranscript(raw: string): string {
     return raw
         .trim()
@@ -21,9 +33,12 @@ export function useVoiceInput(
 ) {
     const [listening, setListening] = useState(false);
     const recognitionRef = useRef<SpeechRecognition | null>(null);
-    const supported =
-        typeof window !== 'undefined' &&
-        !!(window.SpeechRecognition || window.webkitSpeechRecognition);
+    const supported = useSyncExternalStore(
+    subscribeVoiceSupport,
+    getVoiceSupportSnapshot,
+    getVoiceSupportServerSnapshot
+);
+
 
     useEffect(() => {
         return () => {
