@@ -574,7 +574,7 @@ export default function AdminPage() {
         <div className="max-w-7xl mx-auto space-y-6">
             <div className="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 p-5 shadow-sm">
                 <h3 className="text-lg font-bold text-gray-900 dark:text-gray-100">Quản trị hệ thống</h3>
-                <div className="mt-3 flex gap-2 border-b border-gray-200 dark:border-gray-700 overflow-x-auto no-scrollbar">
+                <div className="mt-3 grid grid-cols-5 gap-1 border-b border-gray-200 dark:border-gray-700 sm:flex sm:gap-2">
                     {tabs.map((tab) => (
                         <button
                             key={tab.id}
@@ -584,7 +584,7 @@ export default function AdminPage() {
                                 setConfirmDeleteKey(null);
                                 setEditingCatalogSlug(null);
                             }}
-                            className={`px-4 py-2 text-sm font-semibold border-b-2 -mb-px whitespace-nowrap ${
+                            className={`min-w-0 truncate px-1 py-2 text-center text-xs sm:text-sm font-semibold border-b-2 -mb-px sm:px-4 ${
                                 adminTab === tab.id
                                     ? 'border-blue-600 text-blue-600 dark:text-blue-400'
                                     : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'
@@ -721,13 +721,13 @@ export default function AdminPage() {
                                         value={section.slug}
                                         onChange={(e) => section.setSlug(e.target.value)}
                                         placeholder="slug (vd: circle-k)"
-                                        className="w-2/5 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm text-gray-800 dark:text-gray-200"
+                                        className="w-2/5 min-w-0 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm text-gray-800 dark:text-gray-200"
                                     />
                                     <input
                                         value={section.name}
                                         onChange={(e) => section.setName(e.target.value)}
                                         placeholder="Tên hiển thị"
-                                        className="flex-1 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm text-gray-800 dark:text-gray-200"
+                                        className="min-w-0 flex-1 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm text-gray-800 dark:text-gray-200"
                                     />
                                     <button
                                         type="button"
