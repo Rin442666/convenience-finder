@@ -60,8 +60,15 @@ async function getPgPool(): Promise<PgPoolLike> {
   } catch {
     throw new Error('[db] Chế độ Postgres cần package "pg". Chạy: npm install pg');
   }
-  const PoolCtor = (pgModule as { Pool: new (config: { connectionString: string }) => PgPoolLike }).Pool;
-  pgPool = new PoolCtor({ connectionString });
+  const PoolCtor = (pgModule as { Pool: new (config: { connectionString: string; idleTimeoutMillis?: number; connectionTimeoutMillis?: number }) => PgPoolLike }).Pool;
+  pgPool = new PoolCtor({
+    connectionString,
+    /* Neon serverless hay suspend compute khi idle → connection cũ chết/treo.
+       Dọn connection idle nhanh và fail-fast khi kết nối mới quá lâu để
+       request không kẹt hàng loạt. */
+    idleTimeoutMillis: 10000,
+    connectionTimeoutMillis: 10000,
+  });
   return pgPool;
 }
 

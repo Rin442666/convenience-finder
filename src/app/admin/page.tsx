@@ -184,18 +184,25 @@ export default function AdminPage() {
         }
         try {
             const res = await fetch('/api/admin/stats', { headers: adminHeaders() });
-            const data = await res.json();
+            const text = await res.text();
+            let data;
+            try {
+                data = JSON.parse(text);
+            } catch {
+                throw new Error(`Máy chủ trả về HTTP ${res.status} (không phải JSON)`);
+            }
             if (!res.ok) {
-                throw new Error(data.message || 'load failed');
+                throw new Error(data.detail || data.message || `HTTP ${res.status}`);
             }
             setAdminStats(data);
-        } catch {
+        } catch (err) {
             if (!retrying) {
                 /* Lỗi thoáng qua phía DB (vd: Neon cold start) — thử lại 1 lần. */
                 await new Promise((resolve) => setTimeout(resolve, 1500));
                 return loadAdminStats(true);
             }
-            toast('Không thể tải số liệu thống kê.', 'error');
+            const detail = err instanceof Error && err.message ? err.message.slice(0, 200) : '';
+            toast(detail ? `Thống kê lỗi: ${detail}` : 'Không thể tải số liệu thống kê.', 'error');
             setStatsLoadFailed(true);
         } finally {
             setAdminLoadedTab('stats');

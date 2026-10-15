@@ -44,7 +44,9 @@ export async function GET(request: Request) {
                 ),
                 dbAll<{ id: string; name: string; brand_name: string; rating: unknown; rating_count: unknown }>(
                     `SELECT s.id AS id, s.name AS name, COALESCE(b.name, s.brand_slug) AS brand_name,
-                            ROUND((s.base_rating * 20 + COALESCE(SUM(r.rating), 0)) / (20 + COUNT(r.rating)), 1) AS rating,
+                            /* CAST sang numeric: Postgres không có round(double, int),
+                               còn SQLite vẫn hiểu CAST(... AS numeric). */
+                            ROUND(CAST((s.base_rating * 20 + COALESCE(SUM(r.rating), 0)) / (20 + COUNT(r.rating)) AS numeric), 1) AS rating,
                             (20 + COUNT(r.rating)) AS rating_count
                      FROM stores s
                      LEFT JOIN reviews r ON r.store_id = s.id
@@ -81,9 +83,12 @@ export async function GET(request: Request) {
             })),
             topAmenities: topAmenities.map((r) => ({ name: r.name, count: num(r.count) })),
         });
-    } catch {
+    } catch (err) {
+        /* Log để xem trong Vercel logs; detail trả về cho admin để chẩn đoán. */
+        console.error('[api/admin/stats] failed:', err);
+        const detail = err instanceof Error ? err.message.slice(0, 300) : String(err).slice(0, 300);
         return NextResponse.json(
-            { message: 'Không thể tải số liệu thống kê.' },
+            { message: 'Không thể tải số liệu thống kê.', detail },
             { status: 500 }
         );
     }
