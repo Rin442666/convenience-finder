@@ -574,7 +574,7 @@ export default function AdminPage() {
         <div className="max-w-7xl mx-auto space-y-6">
             <div className="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 p-5 shadow-sm">
                 <h3 className="text-lg font-bold text-gray-900 dark:text-gray-100">Quản trị hệ thống</h3>
-                <div className="mt-3 grid grid-cols-5 gap-1 border-b border-gray-200 dark:border-gray-700 sm:flex sm:gap-2">
+                <div className="mt-3 flex gap-2 border-b border-gray-200 dark:border-gray-700 overflow-x-auto no-scrollbar">
                     {tabs.map((tab) => (
                         <button
                             key={tab.id}
@@ -584,7 +584,7 @@ export default function AdminPage() {
                                 setConfirmDeleteKey(null);
                                 setEditingCatalogSlug(null);
                             }}
-                            className={`min-w-0 truncate px-1 py-2 text-center text-xs sm:text-sm font-semibold border-b-2 -mb-px sm:px-4 ${
+                            className={`px-4 py-2 text-sm font-semibold border-b-2 -mb-px whitespace-nowrap ${
                                 adminTab === tab.id
                                     ? 'border-blue-600 text-blue-600 dark:text-blue-400'
                                     : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'
@@ -714,9 +714,9 @@ export default function AdminPage() {
                                 { kind: 'amenities', title: 'Tiện ích', items: adminAmenities, slug: newAmenitySlug, setSlug: setNewAmenitySlug, name: newAmenityName, setName: setNewAmenityName },
                             ] as const
                         ).map((section) => (
-                            <div key={section.kind}>
+                            <div key={section.kind} className="min-w-0">
                                 <h4 className="font-semibold text-gray-800 dark:text-gray-200">{section.title}</h4>
-                                <div className="mt-2 flex gap-2">
+                                <div className="mt-2 flex flex-wrap gap-2">
                                     <input
                                         value={section.slug}
                                         onChange={(e) => section.setSlug(e.target.value)}
@@ -727,12 +727,12 @@ export default function AdminPage() {
                                         value={section.name}
                                         onChange={(e) => section.setName(e.target.value)}
                                         placeholder="Tên hiển thị"
-                                        className="min-w-0 flex-1 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm text-gray-800 dark:text-gray-200"
+                                        className="min-w-0 flex-1 basis-24 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm text-gray-800 dark:text-gray-200"
                                     />
                                     <button
                                         type="button"
                                         onClick={() => handleAddCatalogItem(section.kind)}
-                                        className="rounded-lg bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700"
+                                        className="shrink-0 rounded-lg bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700"
                                     >
                                         Thêm
                                     </button>
@@ -742,7 +742,7 @@ export default function AdminPage() {
                                         const deleteKey = `${section.kind}:${item.id}`;
                                         const editingKey = `${section.kind}:${item.id}`;
                                         return (
-                                            <li key={item.id} className="rounded-lg bg-gray-50 dark:bg-gray-800 px-3 py-2">
+                                            <li key={item.id} className="overflow-hidden rounded-lg bg-gray-50 dark:bg-gray-800 px-3 py-2">
                                                 {editingCatalogSlug === editingKey ? (
                                                     <div className="flex items-center gap-2">
                                                         <input
