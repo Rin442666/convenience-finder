@@ -5,7 +5,7 @@ import { X } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { toast } from '@/components/Toast';
 import { useApp } from '@/components/app-provider';
-import { useEscapeKey } from '@/lib/use-escape';
+import { useEscapeKey } from '@/hooks/use-escape';
 
 type AuthMode = 'login' | 'register';
 

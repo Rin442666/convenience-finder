@@ -2,11 +2,9 @@
 
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 
-/* Hook nhập liệu bằng giọng nói dùng Web Speech API (tiếng Việt).
-   Dùng chung cho ô tìm kiếm và chatbot sau này. */
+/* Hook nhập liệu bằng giọng nói dùng Web Speech API .
+   Dùng chung cho ô tìm kiếm và chatbot. */
 
-/* Speech-to-text thường dính dấu câu ở cuối ("Winmart.") làm tìm kiếm
-   không khớp — cắt bỏ trước khi trả về. */
 
 function subscribeVoiceSupport(): () => void {
     return () => {};

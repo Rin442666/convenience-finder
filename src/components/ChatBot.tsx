@@ -4,8 +4,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { Mic, Navigation, Send, Star, Volume2, VolumeX, X } from 'lucide-react';
 import { toast } from '@/components/Toast';
-import { useEscapeKey } from '@/lib/use-escape';
-import { useVoiceInput } from '@/lib/use-voice-input';
+import { useEscapeKey } from '@/hooks/use-escape';
+import { useVoiceInput } from '@/hooks/use-voice-input';
 import { DEFAULT_SUGGESTIONS } from '@/lib/chatbot';
 import type { ChatMapAction, ChatResponse, ChatStore } from '@/app/api/chat/route';
 
@@ -212,14 +212,14 @@ export default function ChatBot() {
                 aria-label={open ? 'Đóng chat' : 'Mở trợ lý chat'}
                 className="fixed bottom-5 right-5 z-50 flex h-14 w-14 items-center justify-center overflow-hidden rounded-full bg-blue-600 text-white shadow-xl transition hover:scale-105"
             >
-                {open ? <X className="h-6 w-6" /> : <img src="/chatbot-mascot.png" alt="Trợ lý chat" className="h-full w-full object-cover" />}
+                {open ? <X className="h-6 w-6" /> : <img src="/images/chatbot-mascot.png" alt="Trợ lý chat" className="h-full w-full object-cover" />}
             </button>
 
             {open && (
                 <div className="fixed bottom-24 right-5 z-50 flex h-[min(68vh,540px)] w-[min(calc(100vw-2.5rem),380px)] flex-col overflow-hidden rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 shadow-2xl">
                     <div className="flex items-center gap-3 border-b border-gray-200 dark:border-gray-700 bg-blue-600 px-4 py-3">
                         <span className="flex h-9 w-9 items-center justify-center overflow-hidden rounded-full bg-white/20">
-                            <img src="/chatbot-mascot.png" alt="Trợ lý Co-Fi" className="h-full w-full object-cover" />
+                            <img src="/images/chatbot-mascot.png" alt="Trợ lý Co-Fi" className="h-full w-full object-cover" />
                         </span>
                         <div className="flex-1">
                             <p className="text-sm font-bold text-white">Trợ lý Co-Fi</p>

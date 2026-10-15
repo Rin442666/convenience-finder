@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { X } from 'lucide-react';
 import { toast } from '@/components/Toast';
-import { useEscapeKey } from '@/lib/use-escape';
+import { useEscapeKey } from '@/hooks/use-escape';
 
 const inputClass =
     'w-full rounded-xl border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-4 py-2.5 text-sm text-gray-900 dark:text-gray-100 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-200 dark:focus:ring-blue-800';

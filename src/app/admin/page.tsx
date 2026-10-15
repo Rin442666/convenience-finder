@@ -6,7 +6,7 @@ import { MapPin, Pencil, RotateCcw, Trash2, X } from 'lucide-react';
 import MapView from '@/components/MapView';
 import { toast } from '@/components/Toast';
 import { useApp } from '@/components/app-provider';
-import { useEscapeKey } from '@/lib/use-escape';
+import { useEscapeKey } from '@/hooks/use-escape';
 import { StoreRequestRecord, getRoleLabel, hasPermission } from '@/lib/auth-system';
 import { Store, UserLocation } from '@/types/store';
 import StatsTab from '@/components/admin/StatsTab';

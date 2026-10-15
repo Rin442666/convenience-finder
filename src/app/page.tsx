@@ -5,8 +5,8 @@ import { MapPin, Star, Navigation, X, SearchX, Heart, Clock, Crosshair, SlidersH
 import MapView from '@/components/MapView';
 import { toast } from '@/components/Toast';
 import { useApp } from '@/components/app-provider';
-import { useEscapeKey } from '@/lib/use-escape';
-import { useVoiceInput } from '@/lib/use-voice-input';
+import { useEscapeKey } from '@/hooks/use-escape';
+import { useVoiceInput } from '@/hooks/use-voice-input';
 import { Store, UserLocation } from '@/types/store';
 
 const fallbackBrandOptions = [

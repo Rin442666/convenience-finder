@@ -6,7 +6,7 @@ import { usePathname, useRouter } from 'next/navigation';
 import { Menu, Moon, Sun, User } from 'lucide-react';
 import { useApp } from '@/components/app-provider';
 import AuthModal from '@/components/AuthModal';
-import { useEscapeKey } from '@/lib/use-escape';
+import { useEscapeKey } from '@/hooks/use-escape';
 
 export default function SiteHeader() {
     const { currentUser, authToken, darkMode, toggleDarkMode, logout, authRequestKey } = useApp();
@@ -84,7 +84,7 @@ export default function SiteHeader() {
             <div className="max-w-7xl mx-auto mb-6 flex justify-between items-center gap-4 flex-wrap">
                 <div>
                     <Link href="/" className="flex items-center gap-2">
-                        <img src="/logo.png" alt="ConvenienceFinder" className="h-9 w-9 rounded-xl" />
+                        <img src="/images/logo.png" alt="ConvenienceFinder" className="h-9 w-9 rounded-xl" />
                         <h1 className="text-2xl sm:text-3xl font-extrabold text-blue-600 dark:text-blue-400">
                             ConvenienceFinder
                         </h1>
