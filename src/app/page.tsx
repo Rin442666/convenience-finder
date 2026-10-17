@@ -111,6 +111,8 @@ export default function Home() {
     /* Đánh số request để bỏ qua response cũ về sau (race condition khi
        vị trí đổi lúc request trước chưa xong). */
     const storesRequestIdRef = useRef<number>(0);
+     /* Ref tới từng thẻ cửa hàng trong danh sách — để cuộn tới khi bấm ghim trên map. */
+    const storeCardRefs = useRef<Map<string, HTMLDivElement | null>>(new Map());
     const [radius, setRadius] = useState<number>(1000);
     const [selectedStore, setSelectedStore] = useState<Store | null>(null);
     const [searchTerm, setSearchTerm] = useState<string>('');
@@ -443,6 +445,18 @@ export default function Home() {
         void loadMyRating(store.id);
     };
 
+    /* Bấm ghim trên bản đồ → chọn cửa hàng (vẽ đường như khi bấm thẻ),
+       rồi cuộn khung danh sách bên phải tới đúng thẻ đó. */
+    const handleStoreSelectFromMap = (store: Store) => {
+        setSelectedStore(store);
+        requestAnimationFrame(() => {
+            const el = storeCardRefs.current.get(store.id);
+            if (el) {
+                el.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'center' });
+            }
+        });
+    };
+
     const loadMyRating = async (storeId: string) => {
         if (!currentUser || !authToken) {
             return;
@@ -760,6 +774,7 @@ export default function Home() {
                             selectedStore={selectedStore}
                             pickingEnabled={pickingLocation}
                             onMapClick={handleMapClick}
+                            onStoreSelect={handleStoreSelectFromMap}
                             markerMode="auto"
                         />
                     </div>
@@ -866,6 +881,13 @@ export default function Home() {
                                 return (
                                     <div
                                         key={store.id}
+                                        ref={(el) => {
+                                            if (el) {
+                                                storeCardRefs.current.set(store.id, el);
+                                            } else {
+                                                storeCardRefs.current.delete(store.id);
+                                            }
+                                        }}
                                         onClick={() => setSelectedStore(store)}
                                         className={`w-[82%] shrink-0 snap-start lg:w-auto p-4 rounded-xl border transition-all cursor-pointer ${isSelected
                                                 ? 'border-blue-500 bg-blue-50 dark:bg-blue-950/50 shadow-sm'

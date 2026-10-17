@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { Store, UserLocation } from '../types/store';
+import { getBikeRoute } from '../lib/osrm';
 
 interface MapViewProps {
   center: UserLocation;
@@ -13,6 +14,8 @@ interface MapViewProps {
   /* Kiểu marker cửa hàng: 'pin' (ghim), 'dot' (chấm tròn),
      'auto' (zoom out → chấm, zoom in ≥15 → ghim). */
   markerMode?: 'pin' | 'dot' | 'auto';
+  /* Callback khi bấm vào 1 điểm cửa hàng trên bản đồ. */
+  onStoreSelect?: (store: Store) => void;
 }
 
 /* Escape HTML để chống XSS khi tên/địa chỉ cửa hàng chứa ký tự đặc biệt
@@ -26,10 +29,13 @@ function escapeHtml(value: string): string {
     .replace(/'/g, '&#39;');
 }
 
-export default function MapView({ center, stores, selectedStore, onMapMoveEnd, pickingEnabled, onMapClick, markerMode = 'pin' }: MapViewProps) {
+export default function MapView({ center, stores, selectedStore, onMapMoveEnd, pickingEnabled, onMapClick, markerMode = 'pin', onStoreSelect }: MapViewProps) {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<any>(null);
   const routeLayerRef = useRef<any>(null);
+  const bikeRouteLayerRef = useRef<any>(null);
+  const bikeRouteGenRef = useRef(0);
+  const prevStoresRef = useRef<Store[] | null>(null);
   const markersGroupRef = useRef<any>(null);
   /* Mức zoom hiện tại — chỉ dùng cho markerMode='auto'. */
   const [mapZoom, setMapZoom] = useState(14);
@@ -41,9 +47,11 @@ export default function MapView({ center, stores, selectedStore, onMapMoveEnd, p
      (không gán trực tiếp lúc render) để đúng quy tắc react-hooks/refs. */
   const pickingEnabledRef = useRef(pickingEnabled);
   const onMapClickRef = useRef(onMapClick);
+  const onStoreSelectRef = useRef(onStoreSelect);
   useEffect(() => {
     pickingEnabledRef.current = pickingEnabled;
     onMapClickRef.current = onMapClick;
+    onStoreSelectRef.current = onStoreSelect;
   });
 
   useEffect(() => {
@@ -146,11 +154,21 @@ export default function MapView({ center, stores, selectedStore, onMapMoveEnd, p
               fillOpacity: 0.9,
             })
               .addTo(markersGroupRef.current)
-              .bindPopup(popupHtml);
+              .bindPopup(popupHtml)
+              .on('click', () => {
+                if (!pickingEnabledRef.current && onStoreSelectRef.current) {
+                  onStoreSelectRef.current(store);
+                }
+              });
           } else {
-            window.L.marker([store.lat, store.lng], { icon: storeIcon })
+              window.L.marker([store.lat, store.lng], { icon: storeIcon })
               .addTo(markersGroupRef.current)
-              .bindPopup(popupHtml);
+              .bindPopup(popupHtml)
+              .on('click', () => {
+                if (!pickingEnabledRef.current && onStoreSelectRef.current) {
+                  onStoreSelectRef.current(store);
+                }
+              });
           }
         }
       });
@@ -158,6 +176,21 @@ export default function MapView({ center, stores, selectedStore, onMapMoveEnd, p
       if (routeLayerRef.current) {
         map.removeLayer(routeLayerRef.current);
         routeLayerRef.current = null;
+      }
+
+      /* Tuyến đường xe chỉ hợp lệ trong đúng "phiên chọn" hiện tại:
+         chọn cửa hàng mới / đổi vị trí → vẽ lại;
+         đổi bộ lọc (stores fetch lại) → xóa hẳn, không vẽ lại. */
+      const filtersChanged = prevStoresRef.current !== null && prevStoresRef.current !== stores;
+      prevStoresRef.current = stores;
+
+      const bikeContextChanged = selectionChanged || centerChanged || filtersChanged;
+      if (bikeContextChanged) {
+        bikeRouteGenRef.current += 1;
+        if (bikeRouteLayerRef.current) {
+          map.removeLayer(bikeRouteLayerRef.current);
+          bikeRouteLayerRef.current = null;
+        }
       }
 
       const drawRoute = (latLngs: [number, number][], fitBoundsToRoute: boolean) => {
@@ -208,6 +241,44 @@ export default function MapView({ center, stores, selectedStore, onMapMoveEnd, p
         );
       } else if (centerChanged) {
         map.setView([center.lat, center.lng], 14);
+      }
+
+      /* Đường xe đạp (xấp xỉ cho xe máy) từ vị trí người dùng tới cửa hàng
+         đã chọn — nét liền xanh lá, vẽ đè lên trên đường nét đứt.
+         Chỉ fetch khi vừa chọn cửa hàng mới hoặc vừa đổi vị trí.
+         OSRM lỗi/timeout thì thôi, vẫn giữ đường nét đứt như cũ. */
+      const shouldFetchBikeRoute =
+        bikeContextChanged &&
+        (selectionChanged || centerChanged) &&
+        selectedStore != null &&
+        Number.isFinite(selectedStore.lat) &&
+        Number.isFinite(selectedStore.lng) &&
+        Number.isFinite(center.lat) &&
+        Number.isFinite(center.lng);
+
+      if (shouldFetchBikeRoute && selectedStore) {
+        const myGen = bikeRouteGenRef.current;
+        const requestStoreId = selectedStore.id;
+        const origin = { lat: center.lat, lng: center.lng };
+        const destination = { lat: selectedStore.lat, lng: selectedStore.lng };
+        getBikeRoute(origin, destination)
+          .then((latLngs) => {
+            /* Bỏ qua kết quả cũ: trong lúc chờ OSRM, người dùng đã chọn
+               cửa hàng khác / đổi bộ lọc / đổi vị trí. */
+            if (myGen !== bikeRouteGenRef.current) return;
+            if (!latLngs || !mapInstanceRef.current || !window.L) return;
+            if (prevSelectedIdRef.current !== requestStoreId) return;
+            if (bikeRouteLayerRef.current) {
+              mapInstanceRef.current.removeLayer(bikeRouteLayerRef.current);
+            }
+            bikeRouteLayerRef.current = window.L.polyline(
+              latLngs.map(([lat, lng]) => window.L.latLng(lat, lng)),
+              { color: '#16a34a', weight: 5, opacity: 0.9 }
+            ).addTo(mapInstanceRef.current);
+          })
+          .catch(() => {
+            /* OSRM lỗi: không vẽ gì thêm, đường nét đứt vẫn còn. */
+          });
       }
     };
 

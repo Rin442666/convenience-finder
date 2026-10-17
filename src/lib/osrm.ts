@@ -78,6 +78,53 @@ export async function getRoadDistances(
   }
 }
 
+const OSRM_ROUTE_URL = 'https://router.project-osrm.org/route/v1/bike';
+const ROUTE_TIMEOUT_MS = 8000;
+
+/**
+ * Tuyến đường xe đạp (dùng làm xấp xỉ cho xe máy — server OSRM miễn phí
+ * không có profile xe máy) từ origin tới destination.
+ * Trả về mảng [lat, lng] mô tả hình dạng đường đi, hoặc null khi
+ * OSRM lỗi / timeout / không tìm được đường. Không throw.
+ */
+export async function getBikeRoute(
+  origin: LatLng,
+  destination: LatLng
+): Promise<[number, number][] | null> {
+  try {
+    const coords = `${origin.lng},${origin.lat};${destination.lng},${destination.lat}`;
+    const url = `${OSRM_ROUTE_URL}/${coords}?overview=full&geometries=geojson`;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), ROUTE_TIMEOUT_MS);
+    try {
+      const res = await fetch(url, { signal: controller.signal });
+      if (!res.ok) {
+        return null;
+      }
+      const data = await res.json();
+      if (data?.code !== 'Ok') {
+        return null;
+      }
+      const raw = data?.routes?.[0]?.geometry?.coordinates;
+      if (!Array.isArray(raw)) {
+        return null;
+      }
+      /* GeoJSON trả về [lng, lat] — đổi sang [lat, lng] cho Leaflet. */
+      const latLngs: [number, number][] = [];
+      for (const p of raw) {
+        if (Array.isArray(p) && p.length >= 2 && Number.isFinite(p[0]) && Number.isFinite(p[1])) {
+          latLngs.push([p[1], p[0]]);
+        }
+      }
+      return latLngs.length >= 2 ? latLngs : null;
+    } finally {
+      clearTimeout(timer);
+    }
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Ghi đè distanceMeters bằng khoảng cách đường bộ cho N cửa hàng gần nhất
  * (theo đường chim bay); các cửa hàng còn lại giữ nguyên số chim bay.
