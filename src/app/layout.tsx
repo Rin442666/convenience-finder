@@ -14,7 +14,7 @@ const beVietnamPro = Be_Vietnam_Pro({
 });
 
 export const metadata: Metadata = {
-    title: 'ConvenienceFinder | Tìm cửa hàng tiện lợi gần bạn',
+    title: 'ConvenienceFinder | Tìm cửa hàng tiện lợi',
     description:
         'Tra cứu cửa hàng tiện lợi gần vị trí của bạn: xem giờ mở cửa, tiện ích, khoảng cách và chỉ đường.',
 };

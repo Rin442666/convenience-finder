@@ -12,6 +12,8 @@ INSERT INTO brands (slug, name) VALUES
   ('gs25', 'GS25'),
   ('familymart', 'FamilyMart'),
   ('7-eleven', '7-Eleven'),
+  ('agami', 'Agami'),
+  ('ohmee', 'OhMee'),
   ('other', 'Khác');
 
 INSERT INTO amenities (slug, name) VALUES

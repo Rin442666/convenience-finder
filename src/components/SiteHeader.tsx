@@ -90,7 +90,7 @@ export default function SiteHeader() {
                         </h1>
                     </Link>
                     <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-                        Tìm cửa hàng tiện lợi gần bạn nhất
+                        Tìm cửa hàng tiện lợi gần bạn
                     </p>
                 </div>
                 <div className="flex items-center gap-2">

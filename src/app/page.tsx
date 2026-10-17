@@ -14,17 +14,33 @@ const fallbackBrandOptions = [
     { id: 'winmart', name: 'WinMart+' },
     { id: 'gs25', name: 'GS25' },
     { id: 'familymart', name: 'FamilyMart' },
-    { id: '7-eleven', name: '7-Eleven' },
+    { id: 'seven-eleven', name: '7-Eleven' },
+    { id: 'agami', name: 'Agami' },
+    { id: 'ohmee', name: 'OhMee' },
     { id: 'other', name: 'Khác' },
 ];
 
 const fallbackAmenityOptions = [
     { id: 'wifi', name: 'Wi‑Fi' },
-    { id: 'parking', name: 'Bãi xe' },
+    { id: 'parking', name: 'Bãi đỗ xe' },
     { id: 'seating', name: 'Chỗ ngồi' },
     { id: 'cashless', name: 'Có chuyển khoản' },
     { id: 'wc', name: 'Nhà vệ sinh' },
     { id: 'overnight', name: 'Cho phép qua đêm' },
+    { id: 'microwave', name: 'Lò vi sóng' },
+    { id: 'hot_water', name: 'Nước nóng miễn phí' },
+    { id: 'charging', name: 'Ổ cắm sạc điện thoại' },
+    { id: 'atm', name: 'Cây ATM' },
+    { id: 'bill_payment', name: 'Thanh toán hóa đơn' },
+    { id: 'topup', name: 'Nạp tiền điện thoại' },
+    { id: 'delivery', name: 'Giao hàng tận nơi' },
+    { id: 'parcel', name: 'Nhận/gửi bưu kiện' },
+    { id: 'fresh_food', name: 'Đồ ăn nóng' },
+    { id: 'coffee', name: 'Cà phê pha máy' },
+    { id: 'outdoor', name: 'Chỗ ngồi ngoài trời' },
+    { id: 'print_scan', name: 'In ấn / scan' },
+    { id: 'medicine', name: 'Thuốc cơ bản' },
+    { id: 'lottery', name: 'Vé số' },
 ];
 
 type CatalogItem = { id: string; name: string };
