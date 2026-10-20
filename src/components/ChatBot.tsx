@@ -65,6 +65,33 @@ function StoreCard({ store, onDirections }: { store: ChatStore; onDirections: (s
     );
 }
 
+/* Phiên âm cách đọc cho tên riêng/thuật ngữ tiếng Anh khi đưa vào TTS —
+   giọng Việt đọc nguyên văn sẽ sai (vd "Circle K" thành xi-ếc-lờ-ka).
+   Chỉ áp cho bản sao dùng để đọc, văn bản hiển thị giữ nguyên. Xếp cụm
+   dài trước cụm ngắn để thay thế không chồng nhau (WinMart+ trước WinMart). */
+const SPEECH_REPLACEMENTS: [RegExp, string][] = [
+    [/WinMart\+/gi, 'Uyn mát cộng'],
+    [/WinMart/gi, 'Uyn mát'],
+    [/Circle\s*K/gi, 'Xơ cồ cây'],
+    [/7\s*-\s*Eleven/gi, 'Xe vừn I lê vừn'],
+    [/FamilyMart/gi, 'Pha mi li mát'],
+    [/GS25/gi, 'Gi ét hai lăm'],
+    [/OhMee/gi, 'Ô mi'],
+    [/Co-Fi/gi, 'Cô Phi'],
+    [/Wi-?Fi/gi, 'quai phai'],
+    [/\bATM\b/g, 'ây ti em'],
+    [/24\/7/g, 'hai tư trên bảy'],
+    [/24\s*h\b/gi, '24 giờ'],
+];
+
+function normalizeForSpeech(text: string): string {
+    let out = text;
+    for (const [pattern, replacement] of SPEECH_REPLACEMENTS) {
+        out = out.replace(pattern, replacement);
+    }
+    return out;
+}
+
 export default function ChatBot() {
     const [open, setOpen] = useState(false);
     const [messages, setMessages] = useState<Message[]>([]);
@@ -79,6 +106,9 @@ export default function ChatBot() {
 
     const idRef = useRef(1);
     const sendingRef = useRef(false);
+    /* Số thứ tự của lệnh đọc mới nhất — callback speak() bị trễ (setTimeout)
+       của lệnh cũ kiểm tra số này để tự hủy, tránh đọc chồng câu. */
+    const speakSeqRef = useRef(0);
     const locationRef = useRef<{ lat: number; lng: number } | null>(null);
     const greetedRef = useRef(false);
     const listRef = useRef<HTMLDivElement>(null);
@@ -96,6 +126,7 @@ export default function ChatBot() {
 
     useEffect(() => {
         return () => {
+            speakSeqRef.current += 1;
             if ('speechSynthesis' in window) {
                 window.speechSynthesis.cancel();
             }
@@ -172,6 +203,7 @@ export default function ChatBot() {
                 setSuggestions(DEFAULT_SUGGESTIONS);
             }
             if (!next && 'speechSynthesis' in window) {
+                speakSeqRef.current += 1;
                 window.speechSynthesis.cancel();
                 setSpeakingId(null);
             }
@@ -189,18 +221,45 @@ export default function ChatBot() {
             toast('Trình duyệt không hỗ trợ đọc thành tiếng.', 'error');
             return;
         }
+        const synth = window.speechSynthesis;
+        /* Mỗi lần bấm nút là một lệnh đọc mới; lệnh cũ đang chờ trong
+           setTimeout sẽ tự hủy khi thấy số thứ tự đã đổi. */
+        const seq = ++speakSeqRef.current;
         if (speakingId === id) {
-            window.speechSynthesis.cancel();
+            synth.cancel();
             setSpeakingId(null);
             return;
         }
-        window.speechSynthesis.cancel();
-        const utterance = new SpeechSynthesisUtterance(text);
+        synth.cancel();
+        const utterance = new SpeechSynthesisUtterance(normalizeForSpeech(text));
         utterance.lang = 'vi-VN';
+        /* Ưu tiên giọng Việt bản "Natural/Online" (vd HoaiMy) — giọng đời
+           cũ mặc định (Microsoft An) nghe rất máy móc. */
+        const viVoices = synth.getVoices().filter((v) => v.lang.toLowerCase().startsWith('vi'));
+        const viVoice = viVoices.find((v) => /natural|online/i.test(v.name)) || viVoices[0];
+        if (viVoice) {
+            utterance.voice = viVoice;
+        }
         utterance.onend = () => setSpeakingId(null);
-        utterance.onerror = () => setSpeakingId(null);
+        utterance.onerror = (event) => {
+            setSpeakingId(null);
+            /* interrupted/canceled = người dùng tự dừng hoặc chuyển câu
+               đọc khác, không phải lỗi thật. */
+            if (event.error !== 'interrupted' && event.error !== 'canceled') {
+                toast('Không đọc được nội dung này.', 'error');
+            }
+        };
         setSpeakingId(id);
-        window.speechSynthesis.speak(utterance);
+        /* Edge/Chrome nuốt utterance khi speak() ngay sau cancel() trong
+           cùng một nhịp — chờ 80ms rồi resume + speak mới đọc ổn định
+           (đã kiểm chứng trên máy thật: speak không cancel trước thì đọc). */
+        window.setTimeout(() => {
+            if (speakSeqRef.current !== seq) {
+                return;
+            }
+            synth.resume();
+            synth.speak(utterance);
+        }, 80);
     };
 
     const applyMapAction = (action: ChatMapAction) => {
