@@ -7,6 +7,13 @@ export async function POST(request: Request) {
     const identifier = String(body?.email || body?.identifier || '').trim();
     const password = String(body?.password || '');
 
+    if (!identifier || !password) {
+      return NextResponse.json(
+        { message: 'Vui lòng nhập đầy đủ thông tin đăng nhập.' },
+        { status: 400 }
+      );
+    }
+
     const result = await loginServerUser(identifier, password);
 
     if (!result) {

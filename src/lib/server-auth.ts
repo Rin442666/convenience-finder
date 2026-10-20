@@ -200,6 +200,9 @@ export async function registerServerUser(
   if (!name || !mail || !password) {
     return { error: 'Vui lòng nhập đầy đủ thông tin tài khoản.' };
   }
+  if (name.length < 2 || name.length > 50) {
+    return { error: 'Họ tên phải từ 2 đến 50 ký tự.' };
+  }
   if (!EMAIL_RE.test(mail)) {
     return { error: 'Email không đúng định dạng.' };
   }
@@ -420,5 +423,161 @@ export async function setServerUserActive(
     }
   }
   await dbRun('UPDATE users SET is_active = ? WHERE id = ?', [isActive ? 1 : 0, targetId]);
+  return { ok: true };
+}
+
+export type AdminUserUpdate = {
+  fullName?: string;
+  email?: string;
+  username?: string | null;
+  role?: UserRole;
+  isActive?: boolean;
+};
+
+/** Còn ít nhất một admin khác đang hoạt động ngoài target không? */
+async function hasAnotherActiveAdmin(targetId: string): Promise<boolean> {
+  const row = await dbGet<{ count: number }>(
+    "SELECT COUNT(*) AS count FROM users WHERE role = 'admin' AND is_active = 1 AND id != ?",
+    [targetId]
+  );
+  return !!row && row.count > 0;
+}
+
+/**
+ * Admin sửa thông tin tài khoản: họ tên, email, username, vai trò, trạng thái.
+ * Validate đầy đủ + chặn trùng email/username với tài khoản khác.
+ * Bảo vệ: không tự đổi vai trò/khóa chính mình, không hạ quyền hoặc khóa
+ * admin cuối cùng còn hoạt động.
+ */
+export async function adminUpdateUser(
+  adminId: string,
+  targetId: string,
+  fields: AdminUserUpdate
+): Promise<{ ok: true; user: AdminUserItem } | { error: string }> {
+  const target = await dbGet<UserRowWithCreated>('SELECT * FROM users WHERE id = ?', [targetId]);
+  if (!target) {
+    return { error: 'Không tìm thấy tài khoản.' };
+  }
+
+  const updates: string[] = [];
+  const values: unknown[] = [];
+  const next = {
+    full_name: target.full_name,
+    email: target.email,
+    username: target.username,
+    role: target.role,
+    is_active: target.is_active,
+  };
+
+  if (fields.fullName !== undefined) {
+    const name = fields.fullName.trim();
+    if (name.length < 2 || name.length > 50) {
+      return { error: 'Họ tên phải từ 2 đến 50 ký tự.' };
+    }
+    next.full_name = name;
+  }
+  if (fields.email !== undefined) {
+    const mail = fields.email.trim().toLowerCase();
+    if (!EMAIL_RE.test(mail)) {
+      return { error: 'Email không đúng định dạng.' };
+    }
+    const clash = await findServerUserByEmail(mail);
+    if (clash && clash.id !== targetId) {
+      return { error: 'Email này đã được đăng ký.' };
+    }
+    next.email = mail;
+  }
+  if (fields.username !== undefined) {
+    const uname = fields.username === null ? null : fields.username.trim() || null;
+    if (uname !== null) {
+      if (!USERNAME_RE.test(uname)) {
+        return { error: 'Username chỉ gồm chữ, số, dấu . _ -, từ 3 đến 30 ký tự.' };
+      }
+      const clash = await findServerUserByUsername(uname);
+      if (clash && clash.id !== targetId) {
+        return { error: 'Username này đã được sử dụng.' };
+      }
+    }
+    next.username = uname;
+  }
+  if (fields.role !== undefined) {
+    if (fields.role !== 'user' && fields.role !== 'admin') {
+      return { error: 'Vai trò không hợp lệ.' };
+    }
+    next.role = fields.role;
+  }
+  if (fields.isActive !== undefined) {
+    next.is_active = fields.isActive ? 1 : 0;
+  }
+
+  const losesAdminAccess =
+    target.role === 'admin' && target.is_active === 1 && (next.role !== 'admin' || next.is_active !== 1);
+  if (losesAdminAccess && !(await hasAnotherActiveAdmin(targetId))) {
+    return { error: 'Không thể hạ quyền hoặc khóa admin cuối cùng còn hoạt động.' };
+  }
+  if (adminId === targetId && fields.role !== undefined && fields.role !== target.role) {
+    return { error: 'Không thể tự thay đổi vai trò của chính mình.' };
+  }
+  if (adminId === targetId && fields.isActive === false) {
+    return { error: 'Không thể tự khóa tài khoản của chính mình.' };
+  }
+
+  if (next.full_name !== target.full_name) {
+    updates.push('full_name = ?');
+    values.push(next.full_name);
+  }
+  if (next.email !== target.email) {
+    updates.push('email = ?');
+    values.push(next.email);
+  }
+  if (next.username !== target.username) {
+    updates.push('username = ?');
+    values.push(next.username);
+  }
+  if (next.role !== target.role) {
+    updates.push('role = ?');
+    values.push(next.role);
+  }
+  if (next.is_active !== target.is_active) {
+    updates.push('is_active = ?');
+    values.push(next.is_active);
+  }
+  if (updates.length === 0) {
+    return { error: 'Không có gì để cập nhật.' };
+  }
+
+  await dbRun(`UPDATE users SET ${updates.join(', ')} WHERE id = ?`, [...values, targetId]);
+  const updated: AdminUserItem = {
+    ...toPublicUser(rowToAppUser({ ...target, ...next })),
+    createdAt: target.created_at,
+  };
+  return { ok: true, user: updated };
+}
+
+/**
+ * Admin xóa hẳn tài khoản. Vì reviews/favorites/store_requests/password_resets
+ * đều khóa ngoại tới users(id) (không có ON DELETE CASCADE), phải dọn dữ liệu
+ * liên quan trước rồi mới xóa dòng user.
+ * Bảo vệ: không tự xóa chính mình, không xóa admin cuối cùng còn hoạt động.
+ */
+export async function adminDeleteUser(
+  adminId: string,
+  targetId: string
+): Promise<{ ok: true } | { error: string }> {
+  if (adminId === targetId) {
+    return { error: 'Không thể tự xóa tài khoản của chính mình.' };
+  }
+  const target = await dbGet<UserRow>('SELECT * FROM users WHERE id = ?', [targetId]);
+  if (!target) {
+    return { error: 'Không tìm thấy tài khoản.' };
+  }
+  if (target.role === 'admin' && target.is_active === 1 && !(await hasAnotherActiveAdmin(targetId))) {
+    return { error: 'Không thể xóa admin cuối cùng còn hoạt động.' };
+  }
+  await dbRun('DELETE FROM password_resets WHERE user_id = ?', [targetId]);
+  await dbRun('DELETE FROM favorites WHERE user_id = ?', [targetId]);
+  await dbRun('DELETE FROM reviews WHERE user_id = ?', [targetId]);
+  await dbRun('DELETE FROM store_requests WHERE submitted_by = ?', [targetId]);
+  await dbRun('DELETE FROM users WHERE id = ?', [targetId]);
   return { ok: true };
 }

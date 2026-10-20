@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import crypto from 'crypto';
 import { dbRun } from '@/lib/db';
-import { findServerUserByEmail } from '@/lib/server-auth';
+import { EMAIL_RE, findServerUserByEmail } from '@/lib/server-auth';
 import { isMailConfigured, sendPasswordResetEmail } from '@/lib/mail';
 
 /* Token sống 15 phút. Lưu ISO string để so sánh TEXT đúng trên cả
@@ -15,6 +15,9 @@ export async function POST(request: Request) {
     const email = String(body?.email || '').trim();
     if (!email) {
       return NextResponse.json({ message: 'Vui lòng nhập email.' }, { status: 400 });
+    }
+    if (!EMAIL_RE.test(email)) {
+      return NextResponse.json({ message: 'Email không đúng định dạng.' }, { status: 400 });
     }
     if (!isMailConfigured()) {
       return NextResponse.json(

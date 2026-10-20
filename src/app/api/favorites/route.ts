@@ -39,20 +39,33 @@ export async function POST(req: Request) {
   if (!storeId) {
     return NextResponse.json({ message: 'Thiếu storeId.' }, { status: 400 });
   }
-
-  const existing = await dbGet<{ store_id: string }>(
-    'SELECT store_id FROM favorites WHERE user_id = ? AND store_id = ?',
-    [session.id, storeId]
-  );
-
-  if (existing) {
-    await dbRun('DELETE FROM favorites WHERE user_id = ? AND store_id = ?', [session.id, storeId]);
-    return NextResponse.json({ favorited: false });
+  if (storeId.length > 64) {
+    return NextResponse.json({ message: 'storeId không hợp lệ.' }, { status: 400 });
   }
-  await dbRun('INSERT INTO favorites (user_id, store_id, created_at) VALUES (?, ?, ?)', [
-    session.id,
-    storeId,
-    new Date().toISOString(),
-  ]);
-  return NextResponse.json({ favorited: true });
+
+  try {
+    // Validate cửa hàng tồn tại — tránh lỗi khóa ngoại ở DB khi storeId bịa.
+    const store = await dbGet<{ id: string }>('SELECT id FROM stores WHERE id = ?', [storeId]);
+    if (!store) {
+      return NextResponse.json({ message: 'Không tìm thấy cửa hàng.' }, { status: 404 });
+    }
+
+    const existing = await dbGet<{ store_id: string }>(
+      'SELECT store_id FROM favorites WHERE user_id = ? AND store_id = ?',
+      [session.id, storeId]
+    );
+
+    if (existing) {
+      await dbRun('DELETE FROM favorites WHERE user_id = ? AND store_id = ?', [session.id, storeId]);
+      return NextResponse.json({ favorited: false });
+    }
+    await dbRun('INSERT INTO favorites (user_id, store_id, created_at) VALUES (?, ?, ?)', [
+      session.id,
+      storeId,
+      new Date().toISOString(),
+    ]);
+    return NextResponse.json({ favorited: true });
+  } catch {
+    return NextResponse.json({ message: 'Không thể cập nhật yêu thích.' }, { status: 500 });
+  }
 }

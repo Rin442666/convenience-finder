@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { MapPin, Pencil, RotateCcw, Trash2, X } from 'lucide-react';
+import { MapPin, Pencil, Plus, RotateCcw, Trash2, X } from 'lucide-react';
 import MapView from '@/components/MapView';
 import { toast } from '@/components/Toast';
 import { useApp } from '@/components/app-provider';
@@ -90,7 +90,26 @@ export default function AdminPage() {
     const [editLocation, setEditLocation] = useState<UserLocation | null>(null);
     const [savingStore, setSavingStore] = useState(false);
 
+    const [addingStore, setAddingStore] = useState(false);
+    const [addName, setAddName] = useState('');
+    const [addAddress, setAddAddress] = useState('');
+    const [addBrand, setAddBrand] = useState('other');
+    const [addOpenHours, setAddOpenHours] = useState('');
+    const [addIs24h, setAddIs24h] = useState(false);
+    const [addAmenities, setAddAmenities] = useState<string[]>([]);
+    const [addLocation, setAddLocation] = useState<UserLocation>(DEFAULT_CENTER);
+    const [savingAddStore, setSavingAddStore] = useState(false);
+
+    const [editingUser, setEditingUser] = useState<AdminUserItem | null>(null);
+    const [editUserName, setEditUserName] = useState('');
+    const [editUserEmail, setEditUserEmail] = useState('');
+    const [editUserUsername, setEditUserUsername] = useState('');
+    const [editUserRole, setEditUserRole] = useState<'user' | 'admin'>('user');
+    const [savingUser, setSavingUser] = useState(false);
+
     useEscapeKey(() => setEditingStore(null), editingStore !== null);
+    useEscapeKey(() => setAddingStore(false), addingStore);
+    useEscapeKey(() => setEditingUser(null), editingUser !== null);
     useEscapeKey(() => setConfirmDeleteKey(null), editingStore === null && confirmDeleteKey !== null);
 
     const isAdmin = !!currentUser && currentUser.role === 'admin';
@@ -302,6 +321,76 @@ export default function AdminPage() {
                 return;
             }
             toast(user.isActive ? 'Đã khóa tài khoản.' : 'Đã mở khóa tài khoản.', 'success');
+            await loadAdminUsers();
+        } catch {
+            toast('Không thể kết nối máy chủ.', 'error');
+        }
+    };
+
+    const openEditUser = (user: AdminUserItem) => {
+        setEditingUser(user);
+        setEditUserName(user.fullName);
+        setEditUserEmail(user.email);
+        setEditUserUsername(user.username || '');
+        setEditUserRole(user.role === 'admin' ? 'admin' : 'user');
+        setConfirmDeleteKey(null);
+    };
+
+    const handleSaveUser = async () => {
+        if (!editingUser) return;
+        if (!editUserName.trim()) {
+            toast('Vui lòng nhập họ tên.', 'error');
+            return;
+        }
+        if (!editUserEmail.trim()) {
+            toast('Vui lòng nhập email.', 'error');
+            return;
+        }
+        setSavingUser(true);
+        try {
+            const res = await fetch(`/api/admin/users/${encodeURIComponent(editingUser.id)}`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json', ...adminHeaders() },
+                body: JSON.stringify({
+                    fullName: editUserName.trim(),
+                    email: editUserEmail.trim(),
+                    username: editUserUsername.trim() || null,
+                    role: editUserRole,
+                }),
+            });
+            const data = await res.json();
+            if (!res.ok) {
+                toast(data.message || 'Không thể cập nhật tài khoản.', 'error');
+                return;
+            }
+            toast('Đã cập nhật tài khoản.', 'success');
+            setEditingUser(null);
+            await loadAdminUsers();
+        } catch {
+            toast('Không thể kết nối máy chủ.', 'error');
+        } finally {
+            setSavingUser(false);
+        }
+    };
+
+    const handleDeleteUser = async (user: AdminUserItem) => {
+        const key = `user:${user.id}`;
+        if (confirmDeleteKey !== key) {
+            setConfirmDeleteKey(key);
+            return;
+        }
+        setConfirmDeleteKey(null);
+        try {
+            const res = await fetch(`/api/admin/users/${encodeURIComponent(user.id)}`, {
+                method: 'DELETE',
+                headers: adminHeaders(),
+            });
+            const data = await res.json();
+            if (!res.ok) {
+                toast(data.message || 'Không thể xóa tài khoản.', 'error');
+                return;
+            }
+            toast('Đã xóa tài khoản.', 'success');
             await loadAdminUsers();
         } catch {
             toast('Không thể kết nối máy chủ.', 'error');
@@ -550,6 +639,65 @@ export default function AdminPage() {
         );
     };
 
+    const openAddStore = () => {
+        setAddName('');
+        setAddAddress('');
+        setAddBrand(adminBrands.some((b) => b.id === 'other') ? 'other' : adminBrands[0]?.id || 'other');
+        setAddOpenHours('');
+        setAddIs24h(false);
+        setAddAmenities([]);
+        setAddLocation(DEFAULT_CENTER);
+        setConfirmDeleteKey(null);
+        setAddingStore(true);
+    };
+
+    const toggleAddAmenity = (slug: string) => {
+        setAddAmenities((prev) =>
+            prev.includes(slug) ? prev.filter((a) => a !== slug) : [...prev, slug]
+        );
+    };
+
+    const handleAddStore = async () => {
+        if (!addName.trim()) {
+            toast('Vui lòng nhập tên cửa hàng.', 'error');
+            return;
+        }
+        if (!addAddress.trim()) {
+            toast('Vui lòng nhập địa chỉ.', 'error');
+            return;
+        }
+        setSavingAddStore(true);
+        try {
+            const res = await fetch('/api/admin/stores', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', ...adminHeaders() },
+                body: JSON.stringify({
+                    name: addName.trim(),
+                    address: addAddress.trim(),
+                    brand_slug: addBrand,
+                    lat: addLocation.lat,
+                    lng: addLocation.lng,
+                    open_hours: addOpenHours.trim() || null,
+                    is_24h: addIs24h,
+                    amenities: addAmenities,
+                }),
+            });
+            const data = await res.json();
+            if (!res.ok) {
+                toast(data.message || 'Không thể thêm cửa hàng.', 'error');
+                return;
+            }
+            toast('Đã thêm cửa hàng.', 'success');
+            setAddingStore(false);
+            setStoreStatusFilter('ACTIVE');
+            await loadAdminStores();
+        } catch {
+            toast('Không thể kết nối máy chủ.', 'error');
+        } finally {
+            setSavingAddStore(false);
+        }
+    };
+
     const mapStores: Store[] = adminStores.map((s) => ({
         id: s.id,
         brandId: s.brand_slug,
@@ -647,13 +795,29 @@ export default function AdminPage() {
                                         <td className="py-2 pr-3 text-xs text-gray-500 dark:text-gray-400">{user.createdAt}</td>
                                         <td className="py-2">
                                             {user.id !== currentUser.id && (
-                                                <button
-                                                    type="button"
-                                                    onClick={() => handleToggleUserActive(user)}
-                                                    className={`rounded-lg px-3 py-1.5 text-xs font-medium text-white ${user.isActive ? 'bg-red-600 hover:bg-red-700' : 'bg-green-600 hover:bg-green-700'}`}
-                                                >
-                                                    {user.isActive ? 'Khóa' : 'Mở khóa'}
-                                                </button>
+                                                <div className="flex flex-wrap gap-1.5">
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => openEditUser(user)}
+                                                        className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700"
+                                                    >
+                                                        Sửa
+                                                    </button>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => handleToggleUserActive(user)}
+                                                        className={`rounded-lg px-3 py-1.5 text-xs font-medium text-white ${user.isActive ? 'bg-amber-600 hover:bg-amber-700' : 'bg-green-600 hover:bg-green-700'}`}
+                                                    >
+                                                        {user.isActive ? 'Khóa' : 'Mở khóa'}
+                                                    </button>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => handleDeleteUser(user)}
+                                                        className={`rounded-lg px-3 py-1.5 text-xs font-medium text-white ${confirmDeleteKey === `user:${user.id}` ? 'bg-red-700' : 'bg-red-600 hover:bg-red-700'}`}
+                                                    >
+                                                        {confirmDeleteKey === `user:${user.id}` ? 'Chắc chắn xóa?' : 'Xóa'}
+                                                    </button>
+                                                </div>
                                             )}
                                         </td>
                                     </tr>
@@ -850,6 +1014,15 @@ export default function AdminPage() {
                     <h3 className="text-lg font-bold text-gray-900 dark:text-gray-100">
                         Cửa hàng ({adminStores.length})
                     </h3>
+                    <div className="flex items-center gap-2 flex-wrap">
+                        <button
+                            type="button"
+                            onClick={openAddStore}
+                            className="flex items-center gap-1 rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-700"
+                        >
+                            <Plus className="h-3.5 w-3.5" />
+                            Thêm cửa hàng
+                        </button>
                     <div className="flex rounded-lg bg-gray-100 dark:bg-gray-800 p-0.5 text-xs font-medium">
                         {(
                             [
@@ -871,6 +1044,7 @@ export default function AdminPage() {
                                 {opt.label}
                             </button>
                         ))}
+                    </div>
                     </div>
                 </div>
 
@@ -1060,6 +1234,198 @@ export default function AdminPage() {
                                     {savingStore ? 'Đang lưu...' : 'Lưu thay đổi'}
                                 </button>
                             </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {addingStore && (
+                <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-900/50 p-4 overflow-y-auto">
+                    <div className="w-full max-w-lg rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 p-6 shadow-2xl my-8">
+                        <div className="mb-4 flex items-center justify-between">
+                            <h2 className="text-lg font-bold text-gray-900 dark:text-gray-100">
+                                Thêm cửa hàng
+                            </h2>
+                            <button
+                                type="button"
+                                onClick={() => setAddingStore(false)}
+                                aria-label="Đóng"
+                                className="rounded-lg p-1.5 text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800"
+                            >
+                                <X className="h-5 w-5" />
+                            </button>
+                        </div>
+
+                        <div className="space-y-3">
+                            <div>
+                                <label className="mb-1 block text-xs font-medium text-gray-500 dark:text-gray-400">Tên cửa hàng *</label>
+                                <input value={addName} onChange={(e) => setAddName(e.target.value)} className={`${inputClass} w-full`} />
+                            </div>
+                            <div>
+                                <label className="mb-1 block text-xs font-medium text-gray-500 dark:text-gray-400">Địa chỉ *</label>
+                                <input value={addAddress} onChange={(e) => setAddAddress(e.target.value)} className={`${inputClass} w-full`} />
+                            </div>
+                            <div className="grid grid-cols-2 gap-3">
+                                <div>
+                                    <label className="mb-1 block text-xs font-medium text-gray-500 dark:text-gray-400">Thương hiệu</label>
+                                    <select value={addBrand} onChange={(e) => setAddBrand(e.target.value)} className={`${inputClass} w-full`}>
+                                        {adminBrands.map((b) => (
+                                            <option key={b.id} value={b.id}>{b.name}</option>
+                                        ))}
+                                    </select>
+                                </div>
+                                <div>
+                                    <label className="mb-1 block text-xs font-medium text-gray-500 dark:text-gray-400">Giờ mở cửa</label>
+                                    <input
+                                        value={addOpenHours}
+                                        onChange={(e) => setAddOpenHours(e.target.value)}
+                                        placeholder="vd: 06:00-23:00"
+                                        className={`${inputClass} w-full`}
+                                    />
+                                </div>
+                            </div>
+                            <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+                                <input
+                                    type="checkbox"
+                                    checked={addIs24h}
+                                    onChange={(e) => setAddIs24h(e.target.checked)}
+                                    className="h-4 w-4 rounded"
+                                />
+                                Mở 24/7
+                            </label>
+                            <div>
+                                <p className="mb-1.5 text-xs font-medium text-gray-500 dark:text-gray-400">Tiện ích</p>
+                                <div className="flex flex-wrap gap-2">
+                                    {adminAmenities.map((a) => {
+                                        const active = addAmenities.includes(a.id);
+                                        return (
+                                            <button
+                                                key={a.id}
+                                                type="button"
+                                                onClick={() => toggleAddAmenity(a.id)}
+                                                className={`rounded-full px-3 py-1.5 text-xs font-medium transition ${
+                                                    active
+                                                        ? 'bg-blue-600 text-white shadow-sm'
+                                                        : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700'
+                                                }`}
+                                            >
+                                                {a.name}
+                                            </button>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+                            <div>
+                                <p className="mb-1.5 flex items-center gap-1.5 text-xs font-medium text-gray-500 dark:text-gray-400">
+                                    <MapPin className="h-3.5 w-3.5" />
+                                    Vị trí
+                                    <span className="font-normal">
+                                        ({addLocation.lat.toFixed(5)}, {addLocation.lng.toFixed(5)})
+                                    </span>
+                                </p>
+                                <div className="relative h-[220px] overflow-hidden rounded-xl border border-gray-200 dark:border-gray-700">
+                                    <MapView
+                                        center={addLocation}
+                                        stores={[{ id: 'picked', name: 'Vị trí', address: '', lat: addLocation.lat, lng: addLocation.lng }]}
+                                        selectedStore={{ id: 'picked', name: 'Vị trí', address: '', lat: addLocation.lat, lng: addLocation.lng }}
+                                        pickingEnabled
+                                        onMapClick={(loc) => setAddLocation(loc)}
+                                    />
+                                </div>
+                                <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">Bấm vào bản đồ để chọn vị trí cửa hàng.</p>
+                            </div>
+                        </div>
+
+                        <div className="mt-5 flex items-center justify-end gap-2">
+                            <button
+                                type="button"
+                                onClick={() => setAddingStore(false)}
+                                className="rounded-xl px-4 py-2.5 text-sm font-medium text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800"
+                            >
+                                Hủy
+                            </button>
+                            <button
+                                type="button"
+                                onClick={handleAddStore}
+                                disabled={savingAddStore}
+                                className="flex items-center gap-1.5 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-60"
+                            >
+                                <Plus className="h-4 w-4" />
+                                {savingAddStore ? 'Đang thêm...' : 'Thêm cửa hàng'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {editingUser && (
+                <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-900/50 p-4 overflow-y-auto">
+                    <div className="w-full max-w-md rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 p-6 shadow-2xl my-8">
+                        <div className="mb-4 flex items-center justify-between">
+                            <h2 className="text-lg font-bold text-gray-900 dark:text-gray-100">
+                                Sửa tài khoản
+                            </h2>
+                            <button
+                                type="button"
+                                onClick={() => setEditingUser(null)}
+                                aria-label="Đóng"
+                                className="rounded-lg p-1.5 text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800"
+                            >
+                                <X className="h-5 w-5" />
+                            </button>
+                        </div>
+
+                        <div className="space-y-3">
+                            <div>
+                                <label className="mb-1 block text-xs font-medium text-gray-500 dark:text-gray-400">Họ tên *</label>
+                                <input value={editUserName} onChange={(e) => setEditUserName(e.target.value)} className={`${inputClass} w-full`} />
+                            </div>
+                            <div>
+                                <label className="mb-1 block text-xs font-medium text-gray-500 dark:text-gray-400">Email *</label>
+                                <input value={editUserEmail} onChange={(e) => setEditUserEmail(e.target.value)} className={`${inputClass} w-full`} />
+                            </div>
+                            <div>
+                                <label className="mb-1 block text-xs font-medium text-gray-500 dark:text-gray-400">Username</label>
+                                <input
+                                    value={editUserUsername}
+                                    onChange={(e) => setEditUserUsername(e.target.value)}
+                                    placeholder="Để trống nếu không dùng"
+                                    className={`${inputClass} w-full`}
+                                />
+                            </div>
+                            <div>
+                                <label className="mb-1 block text-xs font-medium text-gray-500 dark:text-gray-400">Vai trò</label>
+                                <select
+                                    value={editUserRole}
+                                    onChange={(e) => setEditUserRole(e.target.value as 'user' | 'admin')}
+                                    className={`${inputClass} w-full`}
+                                >
+                                    <option value="user">Người dùng</option>
+                                    <option value="admin">Quản trị viên</option>
+                                </select>
+                            </div>
+                            <p className="text-xs text-gray-400 dark:text-gray-500">
+                                Đổi email/username sẽ ảnh hưởng cách người dùng này đăng nhập. Mật khẩu không đổi tại đây.
+                            </p>
+                        </div>
+
+                        <div className="mt-5 flex items-center justify-end gap-2">
+                            <button
+                                type="button"
+                                onClick={() => setEditingUser(null)}
+                                className="rounded-xl px-4 py-2.5 text-sm font-medium text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800"
+                            >
+                                Hủy
+                            </button>
+                            <button
+                                type="button"
+                                onClick={handleSaveUser}
+                                disabled={savingUser}
+                                className="flex items-center gap-1.5 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-60"
+                            >
+                                <Pencil className="h-4 w-4" />
+                                {savingUser ? 'Đang lưu...' : 'Lưu thay đổi'}
+                            </button>
                         </div>
                     </div>
                 </div>

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
-import { Mic, Navigation, Send, Star, Volume2, VolumeX, X } from 'lucide-react';
+import { Bus, Footprints, Mic, Navigation, Send, Star, Volume2, VolumeX, X } from 'lucide-react';
 import { toast } from '@/components/Toast';
 import { useEscapeKey } from '@/hooks/use-escape';
 import { useVoiceInput } from '@/hooks/use-voice-input';
@@ -20,7 +20,7 @@ type Message = {
 const GREETING =
     'Chào bạn! Mình là trợ lý tìm cửa hàng tiện lợi. Bạn thử hỏi mình: "tìm Circle K gần tôi", "cửa hàng 24h", hay "chỗ nào có Wi-Fi" nhé.';
 
-function StoreCard({ store }: { store: ChatStore }) {
+function StoreCard({ store, onDirections }: { store: ChatStore; onDirections: (store: ChatStore) => void }) {
     return (
         <div className="mt-2 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-3">
             <div className="flex items-start justify-between gap-2">
@@ -53,15 +53,14 @@ function StoreCard({ store }: { store: ChatStore }) {
                     {store.openText}
                 </span>
             </div>
-            <a
-                href={store.directionsUrl}
-                target="_blank"
-                rel="noopener noreferrer"
+            <button
+                type="button"
+                onClick={() => onDirections(store)}
                 className="mt-2 inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-700"
             >
                 <Navigation className="h-3.5 w-3.5" />
                 Chỉ đường
-            </a>
+            </button>
         </div>
     );
 }
@@ -73,6 +72,8 @@ export default function ChatBot() {
     const [sending, setSending] = useState(false);
     const [suggestions, setSuggestions] = useState<string[]>([]);
     const [speakingId, setSpeakingId] = useState<number | null>(null);
+    /* Cửa hàng đang chọn phương tiện để chỉ đường (popup). */
+    const [directionsStore, setDirectionsStore] = useState<ChatStore | null>(null);
     const pathname = usePathname();
     const router = useRouter();
 
@@ -82,7 +83,16 @@ export default function ChatBot() {
     const greetedRef = useRef(false);
     const listRef = useRef<HTMLDivElement>(null);
 
-    useEscapeKey(() => setOpen(false), open);
+    useEscapeKey(() => setOpen(false), open && directionsStore === null);
+    useEscapeKey(() => setDirectionsStore(null), directionsStore !== null);
+
+    /* Mở Google Maps chỉ đường theo phương tiện người dùng chọn.
+       directionsUrl đã có sẵn origin/destination → chỉ cần thêm travelmode. */
+    const openDirections = (travelmode: 'walking' | 'driving' | 'transit') => {
+        if (!directionsStore) return;
+        window.open(`${directionsStore.directionsUrl}&travelmode=${travelmode}`, '_blank');
+        setDirectionsStore(null);
+    };
 
     useEffect(() => {
         return () => {
@@ -266,7 +276,7 @@ export default function ChatBot() {
                                             </button>
                                         </div>
                                         {msg.stores?.map((store) => (
-                                            <StoreCard key={store.id} store={store} />
+                                            <StoreCard key={store.id} store={store} onDirections={setDirectionsStore} />
                                         ))}
                                         {msg.mapAction && (
                                             <button
@@ -346,6 +356,67 @@ export default function ChatBot() {
                             className="shrink-0 rounded-full bg-blue-600 p-2.5 text-white transition hover:bg-blue-700 disabled:opacity-40"
                         >
                             <Send className="h-4 w-4" />
+                        </button>
+                    </div>
+                </div>
+            )}
+
+            {directionsStore && (
+                <div
+                    className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/50 p-4"
+                    onClick={() => setDirectionsStore(null)}
+                >
+                    <div
+                        onClick={(e) => e.stopPropagation()}
+                        className="w-full max-w-xs rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 p-5 shadow-2xl"
+                    >
+                        <h3 className="text-base font-bold text-gray-900 dark:text-gray-100">
+                            Chỉ đường
+                        </h3>
+                        <p className="mt-1 truncate text-xs text-gray-500 dark:text-gray-400">
+                            {directionsStore.name}
+                        </p>
+                        <div className="mt-4 flex overflow-hidden rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800">
+                            <button
+                                type="button"
+                                onClick={() => openDirections('walking')}
+                                className="flex flex-1 flex-col items-center gap-1.5 px-2 py-3 text-xs font-semibold text-gray-600 dark:text-gray-400 transition hover:bg-gray-100 dark:hover:bg-gray-700 active:bg-blue-600 active:text-white"
+                            >
+                                <Footprints className="h-5 w-5" />
+                                Đi bộ
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => openDirections('driving')}
+                                className="flex flex-1 flex-col items-center gap-1.5 border-x border-gray-200 dark:border-gray-700 px-2 py-3 text-xs font-semibold text-gray-600 dark:text-gray-400 transition hover:bg-gray-100 dark:hover:bg-gray-700 active:bg-blue-600 active:text-white"
+                            >
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5" aria-hidden="true">
+                                    <path d="M5 17h14" />
+                                    <circle cx="7" cy="17" r="3" />
+                                    <circle cx="17" cy="17" r="3" />
+                                    <path d="M7 17l3-7h4l3 7" />
+                                    <path d="M10 10l1.5-4h2L15 10" />
+                                </svg>
+                                Xe máy
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => openDirections('transit')}
+                                className="flex flex-1 flex-col items-center gap-1.5 px-2 py-3 text-xs font-semibold text-gray-600 dark:text-gray-400 transition hover:bg-gray-100 dark:hover:bg-gray-700 active:bg-blue-600 active:text-white"
+                            >
+                                <Bus className="h-5 w-5" />
+                                Xe buýt
+                            </button>
+                        </div>
+                        <p className="mt-2.5 text-center text-[11px] text-gray-400 dark:text-gray-500">
+                            Mở trong Google Maps
+                        </p>
+                        <button
+                            type="button"
+                            onClick={() => setDirectionsStore(null)}
+                            className="mt-1.5 w-full rounded-xl px-4 py-2 text-sm font-medium text-gray-500 dark:text-gray-400 transition hover:bg-gray-100 dark:hover:bg-gray-800"
+                        >
+                            Hủy
                         </button>
                     </div>
                 </div>

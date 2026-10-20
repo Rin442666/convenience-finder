@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { createStoreRequest, listPendingStoreRequests, updateStoreRequestStatus } from '@/lib/store-requests';
 import { findServerUserById, getSessionFromRequest, sessionHasPermission } from '@/lib/server-auth';
 import { addStoreToSeed, findBrandByName, listAmenitiesDb, type StoreRecord } from '@/lib/store-db';
+import { vLatLng, vOptionalText, vSlugList, vText } from '@/lib/validate';
 
 export async function GET(req: Request) {
   /* Quyền admin được suy ra từ session token đã verify,
@@ -27,19 +28,55 @@ export async function POST(req: Request) {
       );
     }
 
-    const body = await req.json();
+    const body = await req.json().catch(() => null);
+    if (!body || typeof body !== 'object') {
+      return NextResponse.json({ message: 'Dữ liệu không hợp lệ.' }, { status: 400 });
+    }
+
+    /* Validate toàn bộ trường trước khi lưu: tên/địa chỉ/thương hiệu bắt
+       buộc, tọa độ phải là vị trí thật đã chọn trên bản đồ, tiện ích chỉ
+       nhận slug có trong danh mục. */
+    const storeName = vText(body.storeName, 'Tên cửa hàng', { min: 2, max: 120 });
+    if (!storeName.ok) {
+      return NextResponse.json({ message: storeName.error }, { status: 400 });
+    }
+    const brandName = vText(body.brandName, 'Thương hiệu', { min: 1, max: 60 });
+    if (!brandName.ok) {
+      return NextResponse.json({ message: brandName.error }, { status: 400 });
+    }
+    const address = vText(body.address, 'Địa chỉ', { min: 5, max: 255 });
+    if (!address.ok) {
+      return NextResponse.json({ message: address.error }, { status: 400 });
+    }
+    const coords = vLatLng(body.lat, body.lng);
+    if (!coords.ok) {
+      return NextResponse.json({ message: coords.error }, { status: 400 });
+    }
+    let amenityIds: string[] = [];
+    if (body.amenities !== undefined) {
+      const list = vSlugList(body.amenities, 'Tiện ích');
+      if (!list.ok) {
+        return NextResponse.json({ message: list.error }, { status: 400 });
+      }
+      const validIds = new Set((await listAmenitiesDb()).map((a) => a.id));
+      amenityIds = list.value.filter((slug) => validIds.has(slug));
+    }
+    const notes = vOptionalText(body.notes, 'Ghi chú', 500);
+    if (!notes.ok) {
+      return NextResponse.json({ message: notes.error }, { status: 400 });
+    }
 
     // Thông tin người gửi lấy từ session đã xác thực, không lấy từ body.
     const createdRequest = await createStoreRequest({
       submittedBy: actor.id,
       submittedByName: actor.fullName,
-      storeName: String(body.storeName || '').trim(),
-      brandName: String(body.brandName || '').trim(),
-      address: String(body.address || '').trim(),
-      lat: Number(body.lat || 0),
-      lng: Number(body.lng || 0),
-      amenities: Array.isArray(body.amenities) ? body.amenities.map(String) : [],
-      notes: String(body.notes || '').trim(),
+      storeName: storeName.value,
+      brandName: brandName.value,
+      address: address.value,
+      lat: coords.value.lat,
+      lng: coords.value.lng,
+      amenities: amenityIds,
+      notes: notes.value || '',
     });
 
 
@@ -66,12 +103,18 @@ export async function PATCH(req: Request) {
       );
     }
 
-    const body = await req.json();
-    const status = body.status;
+    const body = await req.json().catch(() => null);
+    const status = body?.status;
 
     if (status !== 'APPROVED' && status !== 'REJECTED') {
       return NextResponse.json(
         { message: 'Trạng thái không hợp lệ.' },
+        { status: 400 }
+      );
+    }
+    if (typeof body?.requestId !== 'string' || !body.requestId.trim()) {
+      return NextResponse.json(
+        { message: 'Thiếu mã yêu cầu (requestId).' },
         { status: 400 }
       );
     }

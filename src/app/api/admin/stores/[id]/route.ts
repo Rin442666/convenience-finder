@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { dbAll, dbGet, dbRun } from '@/lib/db';
 import { getSessionFromRequest, requireAdmin } from '@/lib/server-auth';
+import { vBool, vLat, vLng, vOptionalText, vSlugList, vText } from '@/lib/validate';
 
 function deny(request: Request) {
   const session = getSessionFromRequest(request);
@@ -62,42 +63,102 @@ export async function PATCH(request: Request, { params }: Params) {
       return deny(request);
     }
     const { id } = await params;
-    const body = await request.json();
+    const body = await request.json().catch(() => null);
+    if (!body || typeof body !== 'object') {
+      return NextResponse.json({ message: 'Dữ liệu không hợp lệ.' }, { status: 400 });
+    }
 
     const existing = await dbGet<{ id: string }>(`SELECT id FROM stores WHERE id = ?`, [id]);
     if (!existing) {
       return NextResponse.json({ message: 'Cửa hàng không tồn tại.' }, { status: 404 });
     }
 
+    /* Validate chặt: trường nào gửi lên mà sai định dạng → 400 ngay,
+       không lặng lẽ bỏ qua như trước. */
     const updates: string[] = [];
     const values: unknown[] = [];
-    const setIfPresent = (column: string, value: unknown, validate?: (v: unknown) => boolean) => {
-      if (value !== undefined && (!validate || validate(value))) {
-        updates.push(`${column} = ?`);
-        values.push(value);
+    const bad = (error: string) => NextResponse.json({ message: error }, { status: 400 });
+
+    if (body.name !== undefined) {
+      const name = vText(body.name, 'Tên cửa hàng', { min: 1, max: 120 });
+      if (!name.ok) return bad(name.error);
+      updates.push('name = ?');
+      values.push(name.value);
+    }
+    if (body.address !== undefined) {
+      const address = vText(body.address, 'Địa chỉ', { min: 1, max: 255 });
+      if (!address.ok) return bad(address.error);
+      updates.push('address = ?');
+      values.push(address.value);
+    }
+    if (body.brand_slug !== undefined) {
+      const brandSlug = vText(body.brand_slug, 'Thương hiệu', { min: 1, max: 64 });
+      if (!brandSlug.ok) return bad(brandSlug.error);
+      const brand = await dbGet<{ slug: string }>('SELECT slug FROM brands WHERE slug = ?', [
+        brandSlug.value,
+      ]);
+      if (!brand) return bad('Thương hiệu không tồn tại.');
+      updates.push('brand_slug = ?');
+      values.push(brandSlug.value);
+    }
+    if (body.lat !== undefined) {
+      const lat = vLat(body.lat);
+      if (!lat.ok) return bad(lat.error);
+      updates.push('lat = ?');
+      values.push(lat.value);
+    }
+    if (body.lng !== undefined) {
+      const lng = vLng(body.lng);
+      if (!lng.ok) return bad(lng.error);
+      updates.push('lng = ?');
+      values.push(lng.value);
+    }
+    if (body.open_hours !== undefined) {
+      const openHours = vOptionalText(body.open_hours, 'Giờ mở cửa', 64);
+      if (!openHours.ok) return bad(openHours.error);
+      updates.push('open_hours = ?');
+      values.push(openHours.value);
+    }
+    if (body.is_24h !== undefined) {
+      const flag = vBool(body.is_24h, 'Mở 24/7');
+      if (!flag.ok) return bad(flag.error);
+      updates.push('is_24h = ?');
+      values.push(flag.value ? 1 : 0);
+    }
+    if (body.status !== undefined) {
+      if (body.status !== 'ACTIVE' && body.status !== 'INACTIVE') {
+        return bad('Trạng thái cửa hàng không hợp lệ.');
       }
-    };
+      updates.push('status = ?');
+      values.push(body.status);
+    }
 
-    setIfPresent('name', typeof body?.name === 'string' ? body.name.trim() : undefined, (v) => (v as string).length > 0 && (v as string).length <= 120);
-    setIfPresent('address', typeof body?.address === 'string' ? body.address.trim() : undefined, (v) => (v as string).length <= 255);
-    setIfPresent('brand_slug', body?.brand_slug, (v) => typeof v === 'string' && v.length > 0 && v.length <= 64);
-    setIfPresent('lat', body?.lat, (v) => typeof v === 'number' && Number.isFinite(v) && v >= -90 && v <= 90);
-    setIfPresent('lng', body?.lng, (v) => typeof v === 'number' && Number.isFinite(v) && v >= -180 && v <= 180);
-    setIfPresent('open_hours', body?.open_hours === null ? null : typeof body?.open_hours === 'string' ? body.open_hours.trim().slice(0, 64) : undefined);
-    setIfPresent('is_24h', body?.is_24h === undefined ? undefined : body.is_24h ? 1 : 0);
-    setIfPresent('status', body?.status, (v) => v === 'ACTIVE' || v === 'INACTIVE');
+    let amenitySlugs: string[] | null = null;
+    if (body.amenities !== undefined) {
+      const list = vSlugList(body.amenities, 'Tiện ích');
+      if (!list.ok) return bad(list.error);
+      amenitySlugs = list.value;
+      for (const slug of amenitySlugs) {
+        const exists = await dbGet<{ slug: string }>(
+          'SELECT slug FROM amenities WHERE slug = ?',
+          [slug]
+        );
+        if (!exists) return bad(`Tiện ích không tồn tại: ${slug}.`);
+      }
+    }
 
-    if (updates.length === 0) {
+    if (updates.length === 0 && amenitySlugs === null) {
       return NextResponse.json({ message: 'Không có gì để cập nhật.' }, { status: 400 });
     }
 
-    await dbRun(`UPDATE stores SET ${updates.join(', ')} WHERE id = ?`, [...values, id]);
+    if (updates.length > 0) {
+      await dbRun(`UPDATE stores SET ${updates.join(', ')} WHERE id = ?`, [...values, id]);
+    }
 
-    // Đồng bộ tiện ích (nếu gửi kèm mảng slug).
-    if (Array.isArray(body?.amenities)) {
-      const slugs = body.amenities.filter((s: unknown): s is string => typeof s === 'string' && s.length > 0 && s.length <= 64);
+    // Đồng bộ tiện ích (nếu gửi kèm mảng slug đã validate).
+    if (amenitySlugs !== null) {
       await dbRun(`DELETE FROM store_amenities WHERE store_id = ?`, [id]);
-      for (const slug of slugs) {
+      for (const slug of amenitySlugs) {
         await dbRun(`INSERT INTO store_amenities (store_id, amenity_slug) VALUES (?, ?)`, [id, slug]);
       }
     }
