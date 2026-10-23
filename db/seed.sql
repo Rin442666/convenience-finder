@@ -11,7 +11,7 @@ INSERT INTO brands (slug, name) VALUES
   ('winmart', 'WinMart+'),
   ('gs25', 'GS25'),
   ('familymart', 'FamilyMart'),
-  ('7-eleven', '7-Eleven'),
+  ('seven-eleven', '7-Eleven'),
   ('agami', 'Agami'),
   ('ohmee', 'OhMee'),
   ('other', 'Khác');
