@@ -2,12 +2,11 @@
 
 import { useState } from 'react';
 import { X } from 'lucide-react';
-import { useRouter } from 'next/navigation';
 import { toast } from '@/components/Toast';
 import { useApp } from '@/components/app-provider';
 import { useEscapeKey } from '@/hooks/use-escape';
 
-type AuthMode = 'login' | 'register';
+type AuthMode = 'login' | 'register' | 'forgot';
 
 const inputClass =
     'w-full rounded-xl border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-4 py-2.5 text-sm text-gray-900 dark:text-gray-100 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-200 dark:focus:ring-blue-800';
@@ -15,13 +14,22 @@ const labelClass = 'mb-1.5 block text-sm font-medium text-gray-700 dark:text-gra
 
 export default function AuthModal({ open, onClose }: { open: boolean; onClose: () => void }) {
     const { login, register } = useApp();
-    const router = useRouter();
     const [authMode, setAuthMode] = useState<AuthMode>('login');
     const [loginForm, setLoginForm] = useState({ identifier: '', password: '' });
     const [registerForm, setRegisterForm] = useState({ fullName: '', email: '', username: '', password: '', confirmPassword: '' });
+    const [forgotEmail, setForgotEmail] = useState('');
+    const [forgotStatus, setForgotStatus] = useState<'idle' | 'sending' | 'done'>('idle');
+    const [forgotMessage, setForgotMessage] = useState('');
     const [submitting, setSubmitting] = useState(false);
 
     const close = () => {
+        /* Đóng từ màn hình quên mật khẩu thì lần mở sau về lại đăng nhập. */
+        if (authMode === 'forgot') {
+            setAuthMode('login');
+            setForgotEmail('');
+            setForgotStatus('idle');
+            setForgotMessage('');
+        }
         onClose();
     };
     useEscapeKey(close, open);
@@ -87,8 +95,44 @@ export default function AuthModal({ open, onClose }: { open: boolean; onClose: (
     };
 
     const goForgotPassword = () => {
-        close();
-        router.push('/quen-mat-khau');
+        /* Điền sẵn email nếu ô đăng nhập đã nhập email. */
+        setForgotEmail(loginForm.identifier.includes('@') ? loginForm.identifier : '');
+        setForgotStatus('idle');
+        setForgotMessage('');
+        setAuthMode('forgot');
+    };
+
+    const handleForgotSubmit = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (forgotStatus !== 'idle') return;
+        const email = forgotEmail.trim();
+        if (!email) {
+            toast('Vui lòng nhập email.', 'error');
+            return;
+        }
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+            toast('Email không đúng định dạng.', 'error');
+            return;
+        }
+        setForgotStatus('sending');
+        try {
+            const res = await fetch('/api/auth/forgot-password', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ email }),
+            });
+            const data = await res.json();
+            if (!res.ok) {
+                setForgotStatus('idle');
+                toast(data.message || 'Không xử lý được yêu cầu.', 'error');
+                return;
+            }
+            setForgotMessage(data.message || 'Đã gửi link đặt lại mật khẩu. Bạn hãy kiểm tra email.');
+            setForgotStatus('done');
+        } catch {
+            setForgotStatus('idle');
+            toast('Không kết nối được máy chủ.', 'error');
+        }
     };
 
     return (
@@ -96,7 +140,7 @@ export default function AuthModal({ open, onClose }: { open: boolean; onClose: (
             <div className="w-full max-w-md rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 p-6 shadow-2xl">
                 <div className="mb-5 flex items-center justify-between">
                     <h2 className="text-xl font-bold text-gray-900 dark:text-gray-100">
-                        {authMode === 'login' ? 'Đăng nhập tài khoản' : 'Đăng ký tài khoản'}
+                        {authMode === 'login' ? 'Đăng nhập tài khoản' : authMode === 'register' ? 'Đăng ký tài khoản' : 'Quên mật khẩu'}
                     </h2>
                     <button
                         type="button"
@@ -160,7 +204,7 @@ export default function AuthModal({ open, onClose }: { open: boolean; onClose: (
                             </button>
                         </div>
                     </form>
-                ) : (
+                ) : authMode === 'register' ? (
                     <form onSubmit={handleRegisterSubmit} className="space-y-4">
                         <div>
                             <label className={labelClass}>Họ và tên:</label>
@@ -225,6 +269,54 @@ export default function AuthModal({ open, onClose }: { open: boolean; onClose: (
                                 type="button"
                                 onClick={() => setAuthMode('login')}
                                 className="font-semibold text-blue-600 dark:text-blue-400 underline hover:text-blue-800 dark:hover:text-blue-200"
+                            >
+                                Quay lại đăng nhập
+                            </button>
+                        </div>
+                    </form>
+                ) : forgotStatus === 'done' ? (
+                    <div>
+                        <p className="mb-4 rounded-xl bg-green-50 dark:bg-green-900/30 px-4 py-3 text-sm text-green-700 dark:text-green-300">
+                            {forgotMessage}
+                        </p>
+                        <button
+                            type="button"
+                            onClick={close}
+                            className="w-full rounded-xl bg-blue-600 py-3 text-lg font-semibold text-white shadow-sm hover:bg-blue-700"
+                        >
+                            Đóng
+                        </button>
+                    </div>
+                ) : (
+                    <form onSubmit={handleForgotSubmit} className="space-y-4">
+                        <p className="text-sm text-gray-500 dark:text-gray-400">
+                            Nhập email đã đăng ký, chúng tôi sẽ gửi link đặt lại mật khẩu cho bạn.
+                        </p>
+                        <div>
+                            <label className={labelClass}>Email:</label>
+                            <input
+                                type="email"
+                                value={forgotEmail}
+                                onChange={(e) => setForgotEmail(e.target.value)}
+                                placeholder="email@example.com"
+                                className={inputClass}
+                                autoComplete="email"
+                            />
+                        </div>
+
+                        <button
+                            type="submit"
+                            disabled={forgotStatus === 'sending'}
+                            className="w-full rounded-xl bg-blue-600 py-3 text-lg font-semibold text-white shadow-sm hover:bg-blue-700 disabled:opacity-60"
+                        >
+                            {forgotStatus === 'sending' ? 'Đang gửi...' : 'Gửi link đặt lại'}
+                        </button>
+
+                        <div className="text-center">
+                            <button
+                                type="button"
+                                onClick={() => setAuthMode('login')}
+                                className="text-sm font-medium text-blue-600 dark:text-blue-400 underline hover:text-blue-800 dark:hover:text-blue-200"
                             >
                                 Quay lại đăng nhập
                             </button>

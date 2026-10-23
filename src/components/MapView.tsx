@@ -6,6 +6,10 @@ import { getBikeRoute } from '../lib/osrm';
 
 interface MapViewProps {
   center: UserLocation;
+  /* Vị trí thật của người dùng (đã qua GPS). Chỉ vẽ ghim xanh
+     "Vị trí của bạn" khi có giá trị này — KHÔNG dùng center để giả
+     làm vị trí người dùng. */
+  userLocation?: UserLocation | null;
   stores: Store[];
   selectedStore?: Store | null;
   onMapMoveEnd?: (newCenter: UserLocation) => void;
@@ -16,6 +20,10 @@ interface MapViewProps {
   markerMode?: 'pin' | 'dot' | 'auto';
   /* Callback khi bấm vào 1 điểm cửa hàng trên bản đồ. */
   onStoreSelect?: (store: Store) => void;
+  /* Có vẽ tuyến đường (nét đứt + tuyến xe đạp OSRM) từ tâm tới điểm đã
+     chọn không. Mặc định true (trang chủ cần); trang chọn vị trí
+     (/yeu-cau) tắt đi để bản đồ chỉ còn 1 điểm đánh dấu. */
+  showRoute?: boolean;
 }
 
 /* Escape HTML để chống XSS khi tên/địa chỉ cửa hàng chứa ký tự đặc biệt
@@ -29,7 +37,7 @@ function escapeHtml(value: string): string {
     .replace(/'/g, '&#39;');
 }
 
-export default function MapView({ center, stores, selectedStore, onMapMoveEnd, pickingEnabled, onMapClick, markerMode = 'pin', onStoreSelect }: MapViewProps) {
+export default function MapView({ center, userLocation, stores, selectedStore, onMapMoveEnd, pickingEnabled, onMapClick, markerMode = 'pin', onStoreSelect, showRoute = true }: MapViewProps) {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<any>(null);
   const routeLayerRef = useRef<any>(null);
@@ -131,9 +139,13 @@ export default function MapView({ center, stores, selectedStore, onMapMoveEnd, p
         shadowSize: [41, 41],
       });
 
-      window.L.marker([center.lat, center.lng], { icon: userIcon })
-        .addTo(markersGroupRef.current)
-        .bindPopup('<b>Vị trí của bạn</b>');
+      /* Ghim xanh "Vị trí của bạn" CHỈ vẽ khi có vị trí GPS thật —
+         không bao giờ dùng tâm bản đồ để giả làm vị trí người dùng. */
+      if (userLocation) {
+        window.L.marker([userLocation.lat, userLocation.lng], { icon: userIcon })
+          .addTo(markersGroupRef.current)
+          .bindPopup('<b>Vị trí của bạn</b>');
+      }
 
       stores.forEach((store) => {
         if (store.lat && store.lng) {
@@ -231,7 +243,7 @@ export default function MapView({ center, stores, selectedStore, onMapMoveEnd, p
          minh họa trực quan (độ dài đúng bằng khoảng cách đường chim bay
          hiển thị trên thẻ). Chỉ đường chi tiết để Google Maps lo khi bấm
          nút "Chỉ đường". */
-      if (selectedStore && Number.isFinite(selectedStore.lat) && Number.isFinite(selectedStore.lng) && Number.isFinite(center.lat) && Number.isFinite(center.lng)) {
+      if (showRoute && selectedStore && Number.isFinite(selectedStore.lat) && Number.isFinite(selectedStore.lng) && Number.isFinite(center.lat) && Number.isFinite(center.lng)) {
         drawRoute(
           [
             [center.lat, center.lng],
@@ -248,6 +260,7 @@ export default function MapView({ center, stores, selectedStore, onMapMoveEnd, p
          Chỉ fetch khi vừa chọn cửa hàng mới hoặc vừa đổi vị trí.
          OSRM lỗi/timeout thì thôi, vẫn giữ đường nét đứt như cũ. */
       const shouldFetchBikeRoute =
+        showRoute &&
         bikeContextChanged &&
         (selectionChanged || centerChanged) &&
         selectedStore != null &&
@@ -299,7 +312,7 @@ export default function MapView({ center, stores, selectedStore, onMapMoveEnd, p
     script.async = true;
     script.onload = () => initMap();
     document.head.appendChild(script);
-  }, [center, stores, selectedStore, useDots]);
+  }, [center, userLocation, stores, selectedStore, useDots]);
 
   return <div ref={mapContainerRef} className="w-full h-full min-h-[500px] rounded-xl z-0" />;
 }

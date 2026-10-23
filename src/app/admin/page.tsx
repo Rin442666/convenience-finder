@@ -7,6 +7,7 @@ import MapView from '@/components/MapView';
 import { toast } from '@/components/Toast';
 import { useApp } from '@/components/app-provider';
 import { useEscapeKey } from '@/hooks/use-escape';
+import { usePickLocation } from '@/hooks/use-pick-location';
 import { StoreRequestRecord, getRoleLabel, hasPermission } from '@/lib/auth-system';
 import { Store, UserLocation } from '@/types/store';
 import StatsTab from '@/components/admin/StatsTab';
@@ -92,12 +93,15 @@ export default function AdminPage() {
 
     const [addingStore, setAddingStore] = useState(false);
     const [addName, setAddName] = useState('');
-    const [addAddress, setAddAddress] = useState('');
+    /* Địa chỉ ⇄ ghim bản đồ đồng bộ 2 chiều 1 lần duy nhất (xong thì khóa).
+       Không tự xin GPS khi mount trang — chỉ xin khi mở modal. */
+    const addPick = usePickLocation(DEFAULT_CENTER, false);
+    /* Điểm ghim đỏ: vị trí đã chọn, chưa có thì lấy tâm bản đồ. */
+    const addLoc: UserLocation = addPick.pin ?? addPick.mapCenter;
     const [addBrand, setAddBrand] = useState('other');
     const [addOpenHours, setAddOpenHours] = useState('');
     const [addIs24h, setAddIs24h] = useState(false);
     const [addAmenities, setAddAmenities] = useState<string[]>([]);
-    const [addLocation, setAddLocation] = useState<UserLocation>(DEFAULT_CENTER);
     const [savingAddStore, setSavingAddStore] = useState(false);
 
     const [editingUser, setEditingUser] = useState<AdminUserItem | null>(null);
@@ -641,14 +645,15 @@ export default function AdminPage() {
 
     const openAddStore = () => {
         setAddName('');
-        setAddAddress('');
         setAddBrand(adminBrands.some((b) => b.id === 'other') ? 'other' : adminBrands[0]?.id || 'other');
         setAddOpenHours('');
         setAddIs24h(false);
         setAddAmenities([]);
-        setAddLocation(DEFAULT_CENTER);
         setConfirmDeleteKey(null);
         setAddingStore(true);
+        /* Reset đồng bộ địa chỉ⇄ghim rồi xin GPS để bản đồ mở gần người dùng. */
+        addPick.reset();
+        addPick.requestGps();
     };
 
     const toggleAddAmenity = (slug: string) => {
@@ -662,7 +667,7 @@ export default function AdminPage() {
             toast('Vui lòng nhập tên cửa hàng.', 'error');
             return;
         }
-        if (!addAddress.trim()) {
+        if (!addPick.address.trim()) {
             toast('Vui lòng nhập địa chỉ.', 'error');
             return;
         }
@@ -673,10 +678,10 @@ export default function AdminPage() {
                 headers: { 'Content-Type': 'application/json', ...adminHeaders() },
                 body: JSON.stringify({
                     name: addName.trim(),
-                    address: addAddress.trim(),
+                    address: addPick.address.trim(),
                     brand_slug: addBrand,
-                    lat: addLocation.lat,
-                    lng: addLocation.lng,
+                    lat: addLoc.lat,
+                    lng: addLoc.lng,
                     open_hours: addOpenHours.trim() || null,
                     is_24h: addIs24h,
                     amenities: addAmenities,
@@ -1263,7 +1268,19 @@ export default function AdminPage() {
                             </div>
                             <div>
                                 <label className="mb-1 block text-xs font-medium text-gray-500 dark:text-gray-400">Địa chỉ *</label>
-                                <input value={addAddress} onChange={(e) => setAddAddress(e.target.value)} className={`${inputClass} w-full`} />
+                                <input
+                                    value={addPick.address}
+                                    onChange={(e) => addPick.setAddress(e.target.value)}
+                                    /* Rời ô nhập hoặc Enter: địa chỉ → ghim tự nhảy tới (1 lần duy nhất). */
+                                    onBlur={addPick.commitAddress}
+                                    onKeyDown={(e) => {
+                                        if (e.key === 'Enter') {
+                                            e.preventDefault();
+                                            addPick.commitAddress();
+                                        }
+                                    }}
+                                    className={`${inputClass} w-full`}
+                                />
                             </div>
                             <div className="grid grid-cols-2 gap-3">
                                 <div>
@@ -1320,19 +1337,42 @@ export default function AdminPage() {
                                     <MapPin className="h-3.5 w-3.5" />
                                     Vị trí
                                     <span className="font-normal">
-                                        ({addLocation.lat.toFixed(5)}, {addLocation.lng.toFixed(5)})
+                                        ({addLoc.lat.toFixed(5)}, {addLoc.lng.toFixed(5)})
                                     </span>
+                                    {addPick.geocoding && (
+                                        <span className="font-normal text-blue-500 dark:text-blue-400">
+                                            Đang tìm địa chỉ…
+                                        </span>
+                                    )}
                                 </p>
                                 <div className="relative h-[220px] overflow-hidden rounded-xl border border-gray-200 dark:border-gray-700">
                                     <MapView
-                                        center={addLocation}
-                                        stores={[{ id: 'picked', name: 'Vị trí', address: '', lat: addLocation.lat, lng: addLocation.lng }]}
-                                        selectedStore={{ id: 'picked', name: 'Vị trí', address: '', lat: addLocation.lat, lng: addLocation.lng }}
+                                        center={addPick.mapCenter}
+                                        /* Chỉ vẽ ghim xanh khi có GPS thật; không vẽ chỉ đường
+                                           trong modal chọn vị trí. */
+                                        userLocation={addPick.pin}
+                                        showRoute={false}
+                                        stores={[{ id: 'picked', name: 'Vị trí', address: '', lat: addLoc.lat, lng: addLoc.lng }]}
+                                        selectedStore={{ id: 'picked', name: 'Vị trí', address: '', lat: addLoc.lat, lng: addLoc.lng }}
                                         pickingEnabled
-                                        onMapClick={(loc) => setAddLocation(loc)}
+                                        onMapClick={(loc) => addPick.placePin(loc)}
                                     />
                                 </div>
-                                <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">Bấm vào bản đồ để chọn vị trí cửa hàng.</p>
+                                <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">
+                                    Bấm vào bản đồ để chọn vị trí cửa hàng.
+                                    {addPick.locFailed && (
+                                        <>
+                                            {' '}Không lấy được vị trí của bạn — đang hiển thị bản đồ Hà Nội.{' '}
+                                            <button
+                                                type="button"
+                                                onClick={addPick.requestGps}
+                                                className="font-medium text-amber-600 dark:text-amber-400 hover:underline"
+                                            >
+                                                Thử lấy lại vị trí
+                                            </button>
+                                        </>
+                                    )}
+                                </p>
                             </div>
                         </div>
 

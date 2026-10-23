@@ -11,6 +11,7 @@ import { toast } from '@/components/Toast';
 import { useApp } from '@/components/app-provider';
 import { hasPermission } from '@/lib/auth-system';
 import { Store, UserLocation } from '@/types/store';
+import { usePickLocation } from '@/hooks/use-pick-location';
 
 const DEFAULT_CENTER: UserLocation = { lat: 21.0285, lng: 105.8542 };
 
@@ -42,9 +43,21 @@ export default function YeuCauPage() {
     const router = useRouter();
     const [storeName, setStoreName] = useState('');
     const [brandName, setBrandName] = useState('Circle K');
-    const [address, setAddress] = useState('');
     const [notes, setNotes] = useState('');
-    const [picked, setPicked] = useState<UserLocation | null>(null);
+    /* Địa chỉ ⇄ ghim bản đồ đồng bộ 2 chiều 1 lần duy nhất (xong thì khóa).
+       Trang này chỉ hiển thị đúng 1 ghim đỏ là điểm đã chọn
+       (mặc định = vị trí hiện tại) — không ghim xanh, không vẽ chỉ đường. */
+    const {
+        address,
+        setAddress,
+        commitAddress,
+        geocoding,
+        pin: picked,
+        placePin: setPicked,
+        mapCenter,
+        locFailed,
+        requestGps,
+    } = usePickLocation(DEFAULT_CENTER);
     const [amenityOptions, setAmenityOptions] = useState<CatalogItem[]>(fallbackAmenityOptions);
     const [brandOptions, setBrandOptions] = useState<CatalogItem[]>(fallbackBrandOptions);
     const [selectedAmenities, setSelectedAmenities] = useState<string[]>(['wifi', 'parking']);
@@ -173,6 +186,14 @@ export default function YeuCauPage() {
                 <input
                     value={address}
                     onChange={(e) => setAddress(e.target.value)}
+                    /* Rời ô nhập hoặc Enter: địa chỉ → ghim tự nhảy tới (1 lần duy nhất). */
+                    onBlur={commitAddress}
+                    onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                            e.preventDefault();
+                            commitAddress();
+                        }
+                    }}
                     className={`${inputClass} md:col-span-2`}
                     placeholder="Địa chỉ cửa hàng"
                 />
@@ -187,10 +208,29 @@ export default function YeuCauPage() {
                             ({picked.lat.toFixed(5)}, {picked.lng.toFixed(5)})
                         </span>
                     )}
+                    {geocoding && (
+                        <span className="font-normal text-blue-500 dark:text-blue-400">
+                            Đang tìm địa chỉ…
+                        </span>
+                    )}
                 </p>
+                {locFailed && (
+                    <p className="mb-2 flex items-center gap-2 text-xs text-amber-600 dark:text-amber-400">
+                        Không lấy được vị trí của bạn — đang hiển thị bản đồ Hà Nội.
+                        <button
+                            type="button"
+                            onClick={requestGps}
+                            className="rounded-full bg-amber-100 dark:bg-amber-900/40 px-2.5 py-1 font-medium hover:bg-amber-200 dark:hover:bg-amber-900/60"
+                        >
+                            Thử lấy lại vị trí
+                        </button>
+                    </p>
+                )}
                 <div className="relative h-[320px] overflow-hidden rounded-xl border border-gray-200 dark:border-gray-700">
                     <MapView
-                        center={DEFAULT_CENTER}
+                        center={mapCenter}
+                        /* Chỉ 1 ghim đỏ đánh dấu điểm đã chọn, không vẽ chỉ đường. */
+                        showRoute={false}
                         stores={pickedStore ? [pickedStore] : []}
                         selectedStore={pickedStore}
                         pickingEnabled

@@ -770,6 +770,9 @@ export default function Home() {
                         )}
                         <MapView
                             center={userLocation}
+                            /* Chỉ vẽ ghim xanh khi GPS thật sự thành công —
+                               đang dò hoặc bị từ chối thì không vẽ ghim giả. */
+                            userLocation={locationStatus === 'gps' ? userLocation : null}
                             stores={stores}
                             selectedStore={selectedStore}
                             pickingEnabled={pickingLocation}
