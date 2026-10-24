@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { X } from 'lucide-react';
 import { toast } from '@/components/Toast';
 import { useEscapeKey } from '@/hooks/use-escape';
+import { useApp } from '@/components/app-provider';
 
 const inputClass =
     'w-full rounded-xl border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-4 py-2.5 text-sm text-gray-900 dark:text-gray-100 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-200 dark:focus:ring-blue-800';
@@ -14,6 +15,7 @@ export default function ChangePasswordModal({ open, onClose }: { open: boolean; 
     const [newPassword, setNewPassword] = useState('');
     const [confirmPassword, setConfirmPassword] = useState('');
     const [submitting, setSubmitting] = useState(false);
+    const { authToken } = useApp();
 
     const close = () => {
         setCurrentPassword('');
@@ -50,9 +52,13 @@ export default function ChangePasswordModal({ open, onClose }: { open: boolean; 
         try {
             const res = await fetch('/api/profile/password/request', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ currentPassword, newPassword }),
-            });
+                headers: {
+                    'Content-Type': 'application/json',
+                     Authorization: `Bearer ${authToken}`,
+        },
+    body: JSON.stringify({ currentPassword, newPassword }),
+});
+
             const data = await res.json();
             if (!res.ok) {
                 toast(data.message || 'Không gửi được yêu cầu.', 'error');
