@@ -19,6 +19,9 @@ export type ChatIntent =
           want24h?: boolean;
           openOnly?: boolean;
           topRated?: boolean;
+          /* Quận/huyện (khóa không dấu, ví dụ 'cau giay') + tên hiển thị. */
+          district?: string;
+          districtName?: string;
       }
     | { kind: 'fallback' };
 
@@ -66,6 +69,42 @@ const AMENITY_KEYWORDS: { slug: string; name: string; keys: string[] }[] = [
     { slug: 'ev_charging', name: 'trạm sạc xe điện', keys: ['sac xe dien', 'tram sac'] },
 ];
 
+/* Quận/huyện Hà Nội (khóa không dấu để so khớp sau normalizeVi).
+   So khớp dạng chuỗi con nên "quận cầu giấy" hay "q. cầu giấy" đều
+   bắt được qua khóa "cau giay". Địa chỉ trong DB có ghi tên quận. */
+const DISTRICT_KEYWORDS: { key: string; name: string }[] = [
+    { key: 'cau giay', name: 'Cầu Giấy' },
+    { key: 'dong da', name: 'Đống Đa' },
+    { key: 'hoan kiem', name: 'Hoàn Kiếm' },
+    { key: 'ba dinh', name: 'Ba Đình' },
+    { key: 'hai ba trung', name: 'Hai Bà Trưng' },
+    { key: 'thanh xuan', name: 'Thanh Xuân' },
+    { key: 'hoang mai', name: 'Hoàng Mai' },
+    { key: 'long bien', name: 'Long Biên' },
+    { key: 'tay ho', name: 'Tây Hồ' },
+    { key: 'nam tu liem', name: 'Nam Từ Liêm' },
+    { key: 'bac tu liem', name: 'Bắc Từ Liêm' },
+    { key: 'ha dong', name: 'Hà Đông' },
+    { key: 'thanh tri', name: 'Thanh Trì' },
+    { key: 'gia lam', name: 'Gia Lâm' },
+    { key: 'dong anh', name: 'Đông Anh' },
+    { key: 'soc son', name: 'Sóc Sơn' },
+    { key: 'son tay', name: 'Sơn Tây' },
+    { key: 'me linh', name: 'Mê Linh' },
+    { key: 'dan phuong', name: 'Đan Phượng' },
+    { key: 'hoai duc', name: 'Hoài Đức' },
+    { key: 'quoc oai', name: 'Quốc Oai' },
+    { key: 'thach that', name: 'Thạch Thất' },
+    { key: 'chuong my', name: 'Chương Mỹ' },
+    { key: 'thanh oai', name: 'Thanh Oai' },
+    { key: 'thuong tin', name: 'Thường Tín' },
+    { key: 'phu xuyen', name: 'Phú Xuyên' },
+    { key: 'ung hoa', name: 'Ứng Hòa' },
+    { key: 'my duc', name: 'Mỹ Đức' },
+    { key: 'ba vi', name: 'Ba Vì' },
+    { key: 'phuc tho', name: 'Phúc Thọ' },
+];
+
 const hasAny = (text: string, patterns: RegExp[]): boolean => patterns.some((p) => p.test(text));
 const includesAny = (text: string, keys: string[]): boolean => keys.some((k) => text.includes(k));
 
@@ -99,6 +138,9 @@ export function detectIntent(rawMessage: string): ChatIntent {
 
     const brand = BRAND_KEYWORDS.find((b) => includesAny(text, b.keys));
     const amenities = AMENITY_KEYWORDS.filter((a) => includesAny(text, a.keys));
+    /* Khớp quận theo ranh giới từ (\\b) — khớp chuỗi con thô sẽ nhận
+       nhầm "hà đông đang mở" thành "đống đa" vì "dong dang" chứa "dong da". */
+    const district = DISTRICT_KEYWORDS.find((d) => new RegExp(`\\b${d.key}\\b`).test(text));
     const want24h = hasAny(text, [/\b24\s*h\b/, /24\/7/, /xuyen dem/, /ca dem/]);
     const openOnly = hasAny(text, [/dang mo/, /\bmo cua\b/, /con mo/]);
     const topRated = hasAny(text, [/danh gia cao/, /tot nhat/, /ngon nhat/, /uy tin/, /chat luong/]);
@@ -113,7 +155,7 @@ export function detectIntent(rawMessage: string): ChatIntent {
         /quan nao/,
     ]);
 
-    if (brand || amenities.length > 0 || want24h || openOnly || topRated || wantsFind) {
+    if (brand || amenities.length > 0 || want24h || openOnly || topRated || district || wantsFind) {
         return {
             kind: 'find',
             brandId: brand?.id,
@@ -123,6 +165,8 @@ export function detectIntent(rawMessage: string): ChatIntent {
             want24h: want24h || undefined,
             openOnly: openOnly || undefined,
             topRated: topRated || undefined,
+            district: district?.key,
+            districtName: district?.name,
         };
     }
     return { kind: 'fallback' };

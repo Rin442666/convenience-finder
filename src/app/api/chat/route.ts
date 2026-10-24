@@ -3,6 +3,7 @@ import { brands, queryStores, type StoreFilters, type StoreRecord } from '@/lib/
 import {
     detectIntent,
     formatDistance,
+    normalizeVi,
     DEFAULT_SUGGESTIONS,
     FIND_SUGGESTIONS,
 } from '@/lib/chatbot';
@@ -69,6 +70,9 @@ function describeFind(intent: Extract<ReturnType<typeof detectIntent>, { kind: '
     const parts: string[] = [];
     if (intent.brandName) {
         parts.push(intent.brandName);
+    }
+    if (intent.districtName) {
+        parts.push(`ở ${intent.districtName}`);
     }
     if (intent.amenityNames?.length) {
         parts.push(`có ${intent.amenityNames.join(', ')}`);
@@ -149,10 +153,13 @@ export async function POST(request: Request) {
         }
 
         if (intent.kind === 'find') {
+            /* Tìm theo quận thì bỏ giới hạn 5km quanh GPS (quận hỏi tới
+               có thể ở xa vị trí hiện tại) — lấy toàn Hà Nội rồi lọc
+               theo địa chỉ bên dưới. */
             const filters: StoreFilters = {
                 lat: center.lat,
                 lng: center.lng,
-                radius: 5000,
+                radius: intent.district ? 100000 : 5000,
                 sort: intent.topRated ? 'rating' : 'nearest',
             };
             if (intent.brandId) {
@@ -168,10 +175,16 @@ export async function POST(request: Request) {
             if (intent.want24h) {
                 stores = stores.filter((s) => s.is24h);
             }
+            if (intent.district) {
+                const key = intent.district;
+                stores = stores.filter((s) => normalizeVi(s.address).includes(key));
+            }
             const top = stores.slice(0, 5);
             if (top.length === 0) {
                 return NextResponse.json<ChatResponse>({
-                    reply: 'Mình không tìm thấy cửa hàng nào phù hợp trong bán kính 5km. Bạn thử nới lỏng điều kiện một chút nhé.',
+                    reply: intent.districtName
+                        ? `Mình không tìm thấy cửa hàng nào ở ${intent.districtName}. Bạn thử quận khác hoặc nới lỏng điều kiện một chút nhé.`
+                        : 'Mình không tìm thấy cửa hàng nào phù hợp trong bán kính 5km. Bạn thử nới lỏng điều kiện một chút nhé.',
                     suggestions: FIND_SUGGESTIONS,
                 });
             }
@@ -184,6 +197,7 @@ export async function POST(request: Request) {
                 suggestions: FIND_SUGGESTIONS,
                 mapAction: {
                     label: `Hiện ${top.length} cửa hàng lên bản đồ`,
+                    search: intent.districtName,
                     brandId: intent.brandId,
                     amenityIds: intent.amenityIds,
                     openOnly: intent.openOnly,
