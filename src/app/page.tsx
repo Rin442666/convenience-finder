@@ -1,13 +1,13 @@
 'use client';
 
 import { useState, useEffect, useRef, useCallback, useMemo, useSyncExternalStore } from 'react';
-import { MapPin, Star, Navigation, X, SearchX, Heart, Clock, Crosshair, SlidersHorizontal, ChevronDown, Mic, Footprints, Bus } from 'lucide-react';
+import { MapPin, Star, Navigation, X, SearchX, Heart, Clock, Crosshair, SlidersHorizontal, ChevronDown, Mic, Footprints, Bus, Zap, Fuel } from 'lucide-react';
 import MapView from '@/components/MapView';
 import { toast } from '@/components/Toast';
 import { useApp } from '@/components/app-provider';
 import { useEscapeKey } from '@/hooks/use-escape';
 import { useVoiceInput } from '@/hooks/use-voice-input';
-import { Store, UserLocation } from '@/types/store';
+import { BusStop, ChargingStation, GasStation, Store, UserLocation } from '@/types/store';
 
 const fallbackBrandOptions = [
     { id: 'circle-k', name: 'Circle K' },
@@ -41,6 +41,9 @@ const fallbackAmenityOptions = [
     { id: 'print_scan', name: 'In ấn / scan' },
     { id: 'medicine', name: 'Thuốc cơ bản' },
     { id: 'lottery', name: 'Vé số' },
+    { id: 'near_bus_stop', name: 'Gần trạm bus' },
+    { id: 'ev_charging', name: 'Trạm sạc xe điện' },
+    { id: 'near_gas_station', name: 'Gần cây xăng' },
 ];
 
 type CatalogItem = { id: string; name: string };
@@ -115,6 +118,107 @@ export default function Home() {
     const storeCardRefs = useRef<Map<string, HTMLDivElement | null>>(new Map());
     const [radius, setRadius] = useState<number>(1000);
     const [selectedStore, setSelectedStore] = useState<Store | null>(null);
+    /* Trạm xe buýt gần cửa hàng đang chọn — nạp riêng theo selectedStore,
+       chỉ hiện marker + danh sách khi đã chọn một cửa hàng. */
+    const [selectedBusStops, setSelectedBusStops] = useState<BusStop[]>([]);
+    const [busStopsLoading, setBusStopsLoading] = useState<boolean>(false);
+
+    useEffect(() => {
+        if (!selectedStore) {
+            setSelectedBusStops([]);
+            return;
+        }
+        let cancelled = false;
+        setBusStopsLoading(true);
+        fetch(`/api/stores/${encodeURIComponent(selectedStore.id)}/bus-stops`)
+            .then((res) => (res.ok ? res.json() : { stops: [] }))
+            .then((data: { stops?: BusStop[] }) => {
+                if (!cancelled) {
+                    setSelectedBusStops(Array.isArray(data.stops) ? data.stops : []);
+                }
+            })
+            .catch(() => {
+                if (!cancelled) {
+                    setSelectedBusStops([]);
+                }
+            })
+            .finally(() => {
+                if (!cancelled) {
+                    setBusStopsLoading(false);
+                }
+            });
+        return () => {
+            cancelled = true;
+        };
+    }, [selectedStore]);
+
+    /* Trạm sạc xe điện gần cửa hàng đang chọn — lớp dữ liệu riêng, tách
+       hẳn với trạm bus ở trên (nạp và hiển thị độc lập). */
+    const [selectedChargingStations, setSelectedChargingStations] = useState<ChargingStation[]>([]);
+    const [chargingLoading, setChargingLoading] = useState<boolean>(false);
+
+    useEffect(() => {
+        if (!selectedStore) {
+            setSelectedChargingStations([]);
+            return;
+        }
+        let cancelled = false;
+        setChargingLoading(true);
+        fetch(`/api/stores/${encodeURIComponent(selectedStore.id)}/charging-stations`)
+            .then((res) => (res.ok ? res.json() : { stations: [] }))
+            .then((data: { stations?: ChargingStation[] }) => {
+                if (!cancelled) {
+                    setSelectedChargingStations(Array.isArray(data.stations) ? data.stations : []);
+                }
+            })
+            .catch(() => {
+                if (!cancelled) {
+                    setSelectedChargingStations([]);
+                }
+            })
+            .finally(() => {
+                if (!cancelled) {
+                    setChargingLoading(false);
+                }
+            });
+        return () => {
+            cancelled = true;
+        };
+    }, [selectedStore]);
+    /* Cây xăng gần cửa hàng đang chọn — lớp dữ liệu riêng thứ ba, nạp
+       và hiển thị độc lập với trạm bus và trạm sạc. */
+    const [selectedGasStations, setSelectedGasStations] = useState<GasStation[]>([]);
+    const [gasLoading, setGasLoading] = useState<boolean>(false);
+
+    useEffect(() => {
+        if (!selectedStore) {
+            setSelectedGasStations([]);
+            return;
+        }
+        let cancelled = false;
+        setGasLoading(true);
+        fetch(`/api/stores/${encodeURIComponent(selectedStore.id)}/gas-stations`)
+            .then((res) => (res.ok ? res.json() : { stations: [] }))
+            .then((data: { stations?: GasStation[] }) => {
+                if (!cancelled) {
+                    setSelectedGasStations(Array.isArray(data.stations) ? data.stations : []);
+                }
+            })
+            .catch(() => {
+                if (!cancelled) {
+                    setSelectedGasStations([]);
+                }
+            })
+            .finally(() => {
+                if (!cancelled) {
+                    setGasLoading(false);
+                }
+            });
+        return () => {
+            cancelled = true;
+        };
+    }, [selectedStore]);
+
     const [searchTerm, setSearchTerm] = useState<string>('');
     const [selectedBrand, setSelectedBrand] = useState<string>('all');
     const [selectedAmenities, setSelectedAmenities] = useState<string[]>([]);
@@ -775,6 +879,9 @@ export default function Home() {
                             userLocation={locationStatus === 'gps' ? userLocation : null}
                             stores={stores}
                             selectedStore={selectedStore}
+                            busStops={selectedBusStops}
+                            chargingStations={selectedChargingStations}
+                            gasStations={selectedGasStations}
                             pickingEnabled={pickingLocation}
                             onMapClick={handleMapClick}
                             onStoreSelect={handleStoreSelectFromMap}
@@ -954,6 +1061,26 @@ export default function Home() {
                                             </div>
                                         )}
 
+                                        {isSelected && (selectedBusStops.length > 0 || selectedChargingStations.length > 0 || selectedGasStations.length > 0) && (
+                                            <p className="mt-2.5 text-[11px] leading-relaxed text-gray-500 dark:text-gray-400">
+                                                {selectedBusStops[0] && (
+                                                    <span className="block">
+                                                        🚌 Trạm bus gần nhất {formatDistanceValue(selectedBusStops[0].distanceMeters)}
+                                                    </span>
+                                                )}
+                                                {selectedChargingStations[0] && (
+                                                    <span className="block">
+                                                        ⚡ Trạm sạc gần nhất {formatDistanceValue(selectedChargingStations[0].distanceMeters)}
+                                                    </span>
+                                                )}
+                                                {selectedGasStations[0] && (
+                                                    <span className="block">
+                                                        ⛽ Cây xăng gần nhất {formatDistanceValue(selectedGasStations[0].distanceMeters)}
+                                                    </span>
+                                                )}
+                                            </p>
+                                        )}
+
                                         <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs text-gray-600 dark:text-gray-400">
                                             <span className="flex items-center gap-1.5">
                                                 <span
@@ -1074,6 +1201,120 @@ export default function Home() {
                                 </div>
                             </div>
                         )}
+
+                        <div className="mt-4">
+                            <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                                <Bus className="h-3.5 w-3.5" />
+                                Trạm bus gần đây
+                            </p>
+                            {busStopsLoading ? (
+                                <p className="text-xs text-gray-400 dark:text-gray-500">Đang tìm trạm bus gần đây...</p>
+                            ) : selectedBusStops.length === 0 ? (
+                                <p className="text-xs text-gray-400 dark:text-gray-500">Chưa có dữ liệu trạm bus cho khu vực này.</p>
+                            ) : (
+                                <>
+                                    {selectedBusStops[0] && !selectedBusStops[0].withinRadius && (
+                                        <p className="mb-2 text-xs text-gray-500 dark:text-gray-400">
+                                            Không có trạm nào trong 500 m — dưới đây là trạm gần nhất:
+                                        </p>
+                                    )}
+                                    <ul className="space-y-1.5">
+                                        {selectedBusStops.map((stop) => (
+                                            <li
+                                                key={stop.id}
+                                                className="flex items-start justify-between gap-3 rounded-xl bg-sky-50 dark:bg-sky-950/50 px-3 py-2"
+                                            >
+                                                <div className="min-w-0">
+                                                    <p className="truncate text-xs font-semibold text-gray-800 dark:text-gray-200">{stop.name}</p>
+                                                    {stop.routes && (
+                                                        <p className="mt-0.5 text-[11px] text-gray-500 dark:text-gray-400">Tuyến: {stop.routes}</p>
+                                                    )}
+                                                </div>
+                                                <span className="shrink-0 text-xs font-semibold text-sky-700 dark:text-sky-300">
+                                                    {formatDistanceValue(stop.distanceMeters)}
+                                                </span>
+                                            </li>
+                                        ))}
+                                    </ul>
+                                </>
+                            )}
+                        </div>
+
+                        <div className="mt-4">
+                            <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                                <Zap className="h-3.5 w-3.5" />
+                                Trạm sạc gần đây
+                            </p>
+                            {chargingLoading ? (
+                                <p className="text-xs text-gray-400 dark:text-gray-500">Đang tìm trạm sạc gần đây...</p>
+                            ) : selectedChargingStations.length === 0 ? (
+                                <p className="text-xs text-gray-400 dark:text-gray-500">Chưa có dữ liệu trạm sạc cho khu vực này.</p>
+                            ) : (
+                                <>
+                                    {selectedChargingStations[0] && !selectedChargingStations[0].withinRadius && (
+                                        <p className="mb-2 text-xs text-gray-500 dark:text-gray-400">
+                                            Không có trạm sạc nào trong 1 km — dưới đây là trạm gần nhất:
+                                        </p>
+                                    )}
+                                    <ul className="space-y-1.5">
+                                        {selectedChargingStations.map((station) => (
+                                            <li
+                                                key={station.id}
+                                                className="flex items-start justify-between gap-3 rounded-xl bg-emerald-50 dark:bg-emerald-950/50 px-3 py-2"
+                                            >
+                                                <div className="min-w-0">
+                                                    <p className="truncate text-xs font-semibold text-gray-800 dark:text-gray-200">{station.name}</p>
+                                                    {station.operator && (
+                                                        <p className="mt-0.5 text-[11px] text-gray-500 dark:text-gray-400">Hãng: {station.operator}</p>
+                                                    )}
+                                                </div>
+                                                <span className="shrink-0 text-xs font-semibold text-emerald-700 dark:text-emerald-300">
+                                                    {formatDistanceValue(station.distanceMeters)}
+                                                </span>
+                                            </li>
+                                        ))}
+                                    </ul>
+                                </>
+                            )}
+                        </div>
+
+                        <div className="mt-4">
+                            <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                                <Fuel className="h-3.5 w-3.5" />
+                                Cây xăng gần đây
+                            </p>
+                            {gasLoading ? (
+                                <p className="text-xs text-gray-400 dark:text-gray-500">Đang tìm cây xăng gần đây...</p>
+                            ) : selectedGasStations.length === 0 ? (
+                                <p className="text-xs text-gray-400 dark:text-gray-500">Chưa có dữ liệu cây xăng cho khu vực này.</p>
+                            ) : (
+                                <>
+                                    {selectedGasStations[0] && !selectedGasStations[0].withinRadius && (
+                                        <p className="mb-2 text-xs text-gray-500 dark:text-gray-400">
+                                            Không có cây xăng nào trong 1 km — dưới đây là cây xăng gần nhất:
+                                        </p>
+                                    )}
+                                    <ul className="space-y-1.5">
+                                        {selectedGasStations.map((station) => (
+                                            <li
+                                                key={station.id}
+                                                className="flex items-start justify-between gap-3 rounded-xl bg-amber-50 dark:bg-amber-950/50 px-3 py-2"
+                                            >
+                                                <div className="min-w-0">
+                                                    <p className="truncate text-xs font-semibold text-gray-800 dark:text-gray-200">{station.name}</p>
+                                                    {station.operator && (
+                                                        <p className="mt-0.5 text-[11px] text-gray-500 dark:text-gray-400">Hãng: {station.operator}</p>
+                                                    )}
+                                                </div>
+                                                <span className="shrink-0 text-xs font-semibold text-amber-700 dark:text-amber-300">
+                                                    {formatDistanceValue(station.distanceMeters)}
+                                                </span>
+                                            </li>
+                                        ))}
+                                    </ul>
+                                </>
+                            )}
+                        </div>
 
                         <div className="mt-4">
                             <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">

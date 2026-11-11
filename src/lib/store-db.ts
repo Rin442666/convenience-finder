@@ -322,6 +322,172 @@ export async function getStoreBaseRating(storeId: string): Promise<number | null
   return row ? Number(row.base_rating) || 0 : null;
 }
 
+/* ===== Trạm xe buýt gần cửa hàng ===== */
+
+/* Bán kính coi là "gần trạm" — đi bộ khoảng 6 phút. Dùng chung cho API
+   trạm gần cửa hàng và cờ tiện ích near_bus_stop trong store_amenities
+   (cờ đó đã được tính sẵn lúc seed bằng đúng bán kính này). */
+export const BUS_STOP_RADIUS_METERS = 500;
+/* Trần an toàn cho số trạm trả về trong bán kính. Điểm dày nhất nội thành
+   có 25 trạm trong 500 m nên trần 30 đồng nghĩa hiện tất cả trạm trong
+   bán kính, chỉ chặn trường hợp dữ liệu bất thường. */
+export const BUS_STOP_LIMIT = 30;
+
+export interface NearbyBusStop {
+  id: string;
+  name: string;
+  lat: number;
+  lng: number;
+  routes: string | null;
+  distanceMeters: number;
+  withinRadius: boolean;
+}
+
+/* Các trạm gần 1 cửa hàng, gần nhất trước:
+   - Có trạm trong 500 m → trả tất cả trạm trong bán kính (trần an toàn
+     BUS_STOP_LIMIT), vì ở các điểm trung chuyển lớn số trạm rất nhiều.
+   - Không có trạm nào trong 500 m → trả đúng 1 trạm gần nhất, đánh dấu
+     withinRadius = false để UI ghi rõ khoảng cách thật. */
+export async function getNearbyBusStops(storeId: string): Promise<NearbyBusStop[] | null> {
+  const store = await dbGet<{ lat: number; lng: number }>(
+    'SELECT lat, lng FROM stores WHERE id = ?',
+    [storeId]
+  );
+  if (!store) {
+    return null;
+  }
+  const rows = await dbAll<{ id: string; name: string; lat: number; lng: number; routes: string | null }>(
+    'SELECT id, name, lat, lng, routes FROM bus_stops'
+  );
+  const sorted = rows
+    .map((row) => ({
+      id: row.id,
+      name: row.name,
+      lat: Number(row.lat),
+      lng: Number(row.lng),
+      routes: row.routes ?? null,
+      distanceMeters: haversineDistanceMeters(store.lat, store.lng, Number(row.lat), Number(row.lng)),
+    }))
+    .sort((a, b) => a.distanceMeters - b.distanceMeters);
+  const within = sorted
+    .filter((stop) => stop.distanceMeters <= BUS_STOP_RADIUS_METERS)
+    .slice(0, BUS_STOP_LIMIT);
+  if (within.length > 0) {
+    return within.map((stop) => ({ ...stop, withinRadius: true }));
+  }
+  return sorted.length > 0 ? [{ ...sorted[0], withinRadius: false }] : [];
+}
+
+/* ===== Trạm sạc xe điện gần cửa hàng ===== */
+
+/* Bán kính coi là "gần trạm sạc" — người dùng đi xe tới trạm nên rộng
+   hơn trạm bus (500 m): 1 km. Cờ tiện ích ev_charging trong
+   store_amenities đã được tính sẵn lúc seed bằng đúng bán kính này. */
+export const CHARGING_RADIUS_METERS = 1000;
+/* Số trạm sạc tối đa trả về khi đã có trạm trong bán kính. */
+export const CHARGING_LIMIT = 5;
+
+export interface NearbyChargingStation {
+  id: string;
+  name: string;
+  lat: number;
+  lng: number;
+  operator: string | null;
+  distanceMeters: number;
+  withinRadius: boolean;
+}
+
+/* Các trạm sạc gần 1 cửa hàng, gần nhất trước — cùng quy tắc với trạm
+   bus: có trạm trong 1 km → tối đa CHARGING_LIMIT trạm gần nhất; không
+   có → đúng 1 trạm gần nhất với withinRadius = false. */
+export async function getNearbyChargingStations(
+  storeId: string
+): Promise<NearbyChargingStation[] | null> {
+  const store = await dbGet<{ lat: number; lng: number }>(
+    'SELECT lat, lng FROM stores WHERE id = ?',
+    [storeId]
+  );
+  if (!store) {
+    return null;
+  }
+  const rows = await dbAll<{
+    id: string;
+    name: string;
+    lat: number;
+    lng: number;
+    operator: string | null;
+  }>('SELECT id, name, lat, lng, operator FROM charging_stations');
+  const sorted = rows
+    .map((row) => ({
+      id: row.id,
+      name: row.name,
+      lat: Number(row.lat),
+      lng: Number(row.lng),
+      operator: row.operator ?? null,
+      distanceMeters: haversineDistanceMeters(store.lat, store.lng, Number(row.lat), Number(row.lng)),
+    }))
+    .sort((a, b) => a.distanceMeters - b.distanceMeters);
+  const within = sorted
+    .filter((station) => station.distanceMeters <= CHARGING_RADIUS_METERS)
+    .slice(0, CHARGING_LIMIT);
+  if (within.length > 0) {
+    return within.map((station) => ({ ...station, withinRadius: true }));
+  }
+  return sorted.length > 0 ? [{ ...sorted[0], withinRadius: false }] : [];
+}
+
+/* ===== Cây xăng gần cửa hàng ===== */
+
+/* Bán kính coi là "gần cây xăng" — đi xe tới đổ xăng nên 1 km như trạm
+   sạc. Cờ tiện ích near_gas_station trong store_amenities đã được tính
+   sẵn lúc seed bằng đúng bán kính này. */
+export const GAS_STATION_RADIUS_METERS = 1000;
+/* Số cây xăng tối đa trả về khi đã có cây xăng trong bán kính. */
+export const GAS_STATION_LIMIT = 5;
+
+export interface NearbyGasStation {
+  id: string;
+  name: string;
+  lat: number;
+  lng: number;
+  operator: string | null;
+  distanceMeters: number;
+  withinRadius: boolean;
+}
+
+/* Các cây xăng gần 1 cửa hàng, gần nhất trước — cùng quy tắc với trạm
+   bus và trạm sạc: có cây xăng trong 1 km → tối đa GAS_STATION_LIMIT cây
+   gần nhất; không có → đúng 1 cây gần nhất với withinRadius = false. */
+export async function getNearbyGasStations(storeId: string): Promise<NearbyGasStation[] | null> {
+  const store = await dbGet<{ lat: number; lng: number }>(
+    'SELECT lat, lng FROM stores WHERE id = ?',
+    [storeId]
+  );
+  if (!store) {
+    return null;
+  }
+  const rows = await dbAll<{ id: string; name: string; lat: number; lng: number; operator: string | null }>(
+    'SELECT id, name, lat, lng, operator FROM gas_stations'
+  );
+  const sorted = rows
+    .map((row) => ({
+      id: row.id,
+      name: row.name,
+      lat: Number(row.lat),
+      lng: Number(row.lng),
+      operator: row.operator ?? null,
+      distanceMeters: haversineDistanceMeters(store.lat, store.lng, Number(row.lat), Number(row.lng)),
+    }))
+    .sort((a, b) => a.distanceMeters - b.distanceMeters);
+  const within = sorted
+    .filter((stop) => stop.distanceMeters <= GAS_STATION_RADIUS_METERS)
+    .slice(0, GAS_STATION_LIMIT);
+  if (within.length > 0) {
+    return within.map((stop) => ({ ...stop, withinRadius: true }));
+  }
+  return sorted.length > 0 ? [{ ...sorted[0], withinRadius: false }] : [];
+}
+
 export async function addStoreToSeed(store: StoreRecord): Promise<void> {
   const existing = await dbGet<{ id: string }>('SELECT id FROM stores WHERE id = ?', [store.id]);
   if (existing) {

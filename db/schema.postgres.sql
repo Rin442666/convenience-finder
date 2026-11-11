@@ -49,6 +49,46 @@ CREATE TABLE IF NOT EXISTS store_amenities (
   PRIMARY KEY (store_id, amenity_slug)
 );
 
+-- Trạm xe buýt (dữ liệu OpenStreetMap). "Gần trạm" của 1 cửa hàng được
+-- tính bằng haversine lúc chạy (xem getNearbyBusStops trong store-db.ts),
+-- không lưu sẵn khoảng cách; riêng cờ lọc near_bus_stop nằm ở
+-- store_amenities như một tiện ích bình thường.
+CREATE TABLE IF NOT EXISTS bus_stops (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  lat DOUBLE PRECISION NOT NULL,
+  lng DOUBLE PRECISION NOT NULL,
+  routes TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_bus_stops_lat_lng ON bus_stops (lat, lng);
+
+-- Trạm sạc xe điện (dữ liệu OpenStreetMap). Cách tính "gần" giống
+-- bus_stops nhưng bán kính 1 km — xem getNearbyChargingStations trong
+-- store-db.ts; cờ lọc là tiện ích ev_charging có sẵn trong amenities.
+CREATE TABLE IF NOT EXISTS charging_stations (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  lat DOUBLE PRECISION NOT NULL,
+  lng DOUBLE PRECISION NOT NULL,
+  operator TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_charging_stations_lat_lng ON charging_stations (lat, lng);
+
+-- Cây xăng gần cửa hàng: cùng khuôn với bus_stops / charging_stations
+-- nhưng tra theo bán kính 1 km — xem getNearbyGasStations trong
+-- store-db.ts; cờ lọc là tiện ích near_gas_station trong amenities.
+CREATE TABLE IF NOT EXISTS gas_stations (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  lat REAL NOT NULL,
+  lng REAL NOT NULL,
+  operator TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_gas_stations_lat_lng ON gas_stations (lat, lng);
+
 CREATE TABLE IF NOT EXISTS store_requests (
   id TEXT PRIMARY KEY,
   submitted_by TEXT NOT NULL REFERENCES users (id),
