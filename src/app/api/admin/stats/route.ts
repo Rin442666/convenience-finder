@@ -20,12 +20,15 @@ export async function GET(request: Request) {
             return deny(request);
         }
 
-        const [storeCount, userCount, reviewCount, favoriteCount, pendingCount] = await Promise.all([
+        const [storeCount, userCount, reviewCount, favoriteCount, pendingCount, busStopCount, chargingStationCount, gasStationCount] = await Promise.all([
             dbAll<{ c: unknown }>(`SELECT COUNT(*) AS c FROM stores WHERE status = 'ACTIVE'`),
             dbAll<{ c: unknown }>(`SELECT COUNT(*) AS c FROM users`),
             dbAll<{ c: unknown }>(`SELECT COUNT(*) AS c FROM reviews`),
             dbAll<{ c: unknown }>(`SELECT COUNT(*) AS c FROM favorites`),
             dbAll<{ c: unknown }>(`SELECT COUNT(*) AS c FROM store_requests WHERE status = 'PENDING'`),
+            dbAll<{ c: unknown }>(`SELECT COUNT(*) AS c FROM bus_stops`),
+            dbAll<{ c: unknown }>(`SELECT COUNT(*) AS c FROM charging_stations`),
+            dbAll<{ c: unknown }>(`SELECT COUNT(*) AS c FROM gas_stations`),
         ]);
 
         const [storesByBrand, ratingDistribution, requestsByStatus, topStores, topAmenities] =
@@ -70,6 +73,9 @@ export async function GET(request: Request) {
                 reviews: num(reviewCount[0]?.c),
                 favorites: num(favoriteCount[0]?.c),
                 pendingRequests: num(pendingCount[0]?.c),
+                busStops: num(busStopCount[0]?.c),
+                chargingStations: num(chargingStationCount[0]?.c),
+                gasStations: num(gasStationCount[0]?.c),
             },
             storesByBrand: storesByBrand.map((r) => ({ name: r.name, count: num(r.count) })),
             ratingDistribution: ratingDistribution.map((r) => ({ rating: num(r.rating), count: num(r.count) })),

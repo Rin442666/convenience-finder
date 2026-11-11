@@ -488,6 +488,33 @@ export async function getNearbyGasStations(storeId: string): Promise<NearbyGasSt
   return sorted.length > 0 ? [{ ...sorted[0], withinRadius: false }] : [];
 }
 
+/* Ba cờ tiện ích KHÔNG do người dùng khai mà được tính từ khoảng cách
+   tới dữ liệu trạm: near_bus_stop (trạm bus ≤ 500 m), ev_charging
+   (trạm sạc ≤ 1 km), near_gas_station (cây xăng ≤ 1 km) — đúng quy tắc
+   đã dùng khi seed 787 cửa hàng. Cửa hàng thêm sau này (admin tạo trực
+   tiếp hoặc duyệt từ yêu cầu) cũng phải mang đúng các cờ tính được,
+   nếu không bộ lọc tiện ích sẽ sót cửa hàng đó. */
+const COMPUTED_AMENITY_SLUGS = ['near_bus_stop', 'ev_charging', 'near_gas_station'];
+
+async function computeStationAmenitySlugs(lat: number, lng: number): Promise<string[]> {
+  const slugs: string[] = [];
+  const checks: { table: string; radius: number; slug: string }[] = [
+    { table: 'bus_stops', radius: BUS_STOP_RADIUS_METERS, slug: 'near_bus_stop' },
+    { table: 'charging_stations', radius: CHARGING_RADIUS_METERS, slug: 'ev_charging' },
+    { table: 'gas_stations', radius: GAS_STATION_RADIUS_METERS, slug: 'near_gas_station' },
+  ];
+  for (const check of checks) {
+    const rows = await dbAll<{ lat: number; lng: number }>(`SELECT lat, lng FROM ${check.table}`);
+    const nearest = Math.min(
+      ...rows.map((row) => haversineDistanceMeters(lat, lng, Number(row.lat), Number(row.lng)))
+    );
+    if (nearest <= check.radius) {
+      slugs.push(check.slug);
+    }
+  }
+  return slugs;
+}
+
 export async function addStoreToSeed(store: StoreRecord): Promise<void> {
   const existing = await dbGet<{ id: string }>('SELECT id FROM stores WHERE id = ?', [store.id]);
   if (existing) {
@@ -510,7 +537,11 @@ export async function addStoreToSeed(store: StoreRecord): Promise<void> {
       new Date().toISOString(),
     ]
   );
-  for (const amenityId of store.amenities || []) {
+  const declaredAmenities = (store.amenities || []).filter(
+    (amenityId) => !COMPUTED_AMENITY_SLUGS.includes(amenityId)
+  );
+  const computedAmenities = await computeStationAmenitySlugs(store.lat, store.lng);
+  for (const amenityId of [...declaredAmenities, ...computedAmenities]) {
     const amenityExists = await dbGet<{ slug: string }>(
       'SELECT slug FROM amenities WHERE slug = ?',
       [amenityId]

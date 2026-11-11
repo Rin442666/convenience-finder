@@ -1,6 +1,6 @@
 'use client';
 
-import { Heart, Inbox, Star, Store, Users } from 'lucide-react';
+import { Bus, Fuel, Heart, Inbox, Star, Store, Users, Zap } from 'lucide-react';
 
 export type AdminStats = {
     totals: {
@@ -9,6 +9,9 @@ export type AdminStats = {
         reviews: number;
         favorites: number;
         pendingRequests: number;
+        busStops: number;
+        chargingStations: number;
+        gasStations: number;
     };
     storesByBrand: { name: string; count: number }[];
     ratingDistribution: { rating: number; count: number }[];
@@ -123,6 +126,9 @@ export default function StatsTab({ stats }: { stats: AdminStats | null }) {
         { label: 'Lượt đánh giá', value: stats.totals.reviews, icon: Star, iconClass: 'bg-amber-100 text-amber-600 dark:bg-amber-950 dark:text-amber-400' },
         { label: 'Lượt yêu thích', value: stats.totals.favorites, icon: Heart, iconClass: 'bg-rose-100 text-rose-600 dark:bg-rose-950 dark:text-rose-400' },
         { label: 'Yêu cầu chờ duyệt', value: stats.totals.pendingRequests, icon: Inbox, iconClass: 'bg-orange-100 text-orange-600 dark:bg-orange-950 dark:text-orange-400' },
+        { label: 'Trạm xe buýt', value: stats.totals.busStops, icon: Bus, iconClass: 'bg-sky-100 text-sky-600 dark:bg-sky-950 dark:text-sky-400' },
+        { label: 'Trạm sạc xe điện', value: stats.totals.chargingStations, icon: Zap, iconClass: 'bg-green-100 text-green-600 dark:bg-green-950 dark:text-green-400' },
+        { label: 'Cây xăng', value: stats.totals.gasStations, icon: Fuel, iconClass: 'bg-amber-100 text-amber-600 dark:bg-amber-950 dark:text-amber-400' },
     ];
 
     const maxBrand = Math.max(0, ...stats.storesByBrand.map((b) => b.count));
@@ -132,7 +138,7 @@ export default function StatsTab({ stats }: { stats: AdminStats | null }) {
 
     return (
         <div className="mt-4 space-y-4">
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-5">
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-4">
                 {cards.map((card) => (
                     <div
                         key={card.label}
