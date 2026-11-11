@@ -53,6 +53,11 @@ function StoreCard({ store, onDirections }: { store: ChatStore; onDirections: (s
                     {store.openText}
                 </span>
             </div>
+            {store.stationText && (
+                <p className="mt-1 text-[11px] text-gray-500 dark:text-gray-400">
+                    Trạm gần nhất: {store.stationText}
+                </p>
+            )}
             <button
                 type="button"
                 onClick={() => onDirections(store)}

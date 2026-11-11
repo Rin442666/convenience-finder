@@ -488,6 +488,81 @@ export async function getNearbyGasStations(storeId: string): Promise<NearbyGasSt
   return sorted.length > 0 ? [{ ...sorted[0], withinRadius: false }] : [];
 }
 
+/* ===== Dữ liệu trạm cho chatbot ===== */
+
+/* Trạm gần nhất của từng loại quanh 1 cửa hàng — chatbot dùng để kèm
+   dòng tóm tắt vào thẻ cửa hàng và trả lời câu hỏi theo tên cửa hàng. */
+export interface StoreStationSummary {
+  bus: NearbyBusStop | null;
+  charging: NearbyChargingStation | null;
+  gas: NearbyGasStation | null;
+}
+
+export async function getStoreStationSummary(storeId: string): Promise<StoreStationSummary | null> {
+  const [bus, charging, gas] = await Promise.all([
+    getNearbyBusStops(storeId),
+    getNearbyChargingStations(storeId),
+    getNearbyGasStations(storeId),
+  ]);
+  if (bus === null || charging === null || gas === null) {
+    return null;
+  }
+  return { bus: bus[0] ?? null, charging: charging[0] ?? null, gas: gas[0] ?? null };
+}
+
+export type StationTableKind = 'bus' | 'charging' | 'gas';
+
+export interface PointStation {
+  id: string;
+  name: string;
+  lat: number;
+  lng: number;
+  operator: string | null;
+  routes: string | null;
+  distanceMeters: number;
+  withinRadius: boolean;
+}
+
+/* Bán kính liệt kê khi chatbot hỏi trạm quanh một điểm bất kỳ. */
+export const POINT_STATION_RADIUS_METERS = 1000;
+export const POINT_STATION_LIMIT = 5;
+
+/* Các trạm quanh một tọa độ bất kỳ (không gắn với cửa hàng nào) —
+   chatbot dùng khi người dùng hỏi "trạm/cây xăng quanh <địa chỉ>".
+   Quy tắc như theo cửa hàng: có trạm trong bán kính thì trả tối đa
+   POINT_STATION_LIMIT trạm gần nhất, không có thì trả 1 trạm gần nhất
+   với withinRadius = false. */
+export async function getStationsNearPoint(
+  lat: number,
+  lng: number,
+  kind: StationTableKind
+): Promise<PointStation[]> {
+  const table =
+    kind === 'bus' ? 'bus_stops' : kind === 'charging' ? 'charging_stations' : 'gas_stations';
+  const extraColumn = kind === 'bus' ? 'routes' : 'operator';
+  const rows = await dbAll<Record<string, unknown>>(
+    `SELECT id, name, lat, lng, ${extraColumn} FROM ${table}`
+  );
+  const sorted = rows
+    .map((row) => ({
+      id: String(row.id),
+      name: String(row.name),
+      lat: Number(row.lat),
+      lng: Number(row.lng),
+      operator: kind === 'bus' ? null : ((row.operator as string | null) ?? null),
+      routes: kind === 'bus' ? ((row.routes as string | null) ?? null) : null,
+      distanceMeters: haversineDistanceMeters(lat, lng, Number(row.lat), Number(row.lng)),
+    }))
+    .sort((a, b) => a.distanceMeters - b.distanceMeters);
+  const within = sorted
+    .filter((stop) => stop.distanceMeters <= POINT_STATION_RADIUS_METERS)
+    .slice(0, POINT_STATION_LIMIT);
+  if (within.length > 0) {
+    return within.map((stop) => ({ ...stop, withinRadius: true }));
+  }
+  return sorted.length > 0 ? [{ ...sorted[0], withinRadius: false }] : [];
+}
+
 /* Ba cờ tiện ích KHÔNG do người dùng khai mà được tính từ khoảng cách
    tới dữ liệu trạm: near_bus_stop (trạm bus ≤ 500 m), ev_charging
    (trạm sạc ≤ 1 km), near_gas_station (cây xăng ≤ 1 km) — đúng quy tắc

@@ -1,11 +1,22 @@
 import { NextResponse } from 'next/server';
-import { brands, queryStores, type StoreFilters, type StoreRecord } from '@/lib/store-db';
+import {
+    brands,
+    getStationsNearPoint,
+    getStoreStationSummary,
+    queryStores,
+    type StoreFilters,
+    type StoreRecord,
+} from '@/lib/store-db';
+import { dbAll } from '@/lib/db';
+import { geocodeAddress } from '@/lib/geocode';
 import {
     detectIntent,
     formatDistance,
     normalizeVi,
     DEFAULT_SUGGESTIONS,
     FIND_SUGGESTIONS,
+    STATION_SUGGESTIONS,
+    type StationType,
 } from '@/lib/chatbot';
 
 export type ChatStore = {
@@ -17,6 +28,9 @@ export type ChatStore = {
     ratingCount: number;
     distanceText: string;
     openText: string;
+    /* Dòng tóm tắt trạm gần nhất (🚌/⚡/⛽ + khoảng cách) — thẻ nào
+       cũng có vì luôn tra được trạm gần nhất của cửa hàng. */
+    stationText?: string;
     lat: number;
     lng: number;
     directionsUrl: string;
@@ -43,7 +57,8 @@ const brandNameOf = (brandId?: string): string =>
 
 function toChatStore(
     store: StoreRecord,
-    origin: { lat: number; lng: number } | null
+    origin: { lat: number; lng: number } | null,
+    stationText?: string
 ): ChatStore {
     const openText = store.is24h ? 'Mở 24h' : store.isOpen ? 'Đang mở' : 'Đã đóng cửa';
     /* Gắn origin (vị trí GPS của người dùng) vào link để Google Maps chỉ
@@ -60,6 +75,7 @@ function toChatStore(
         ratingCount: store.ratingCount ?? 0,
         distanceText: formatDistance(store.distanceMeters),
         openText,
+        stationText,
         lat: store.lat,
         lng: store.lng,
         directionsUrl,
@@ -123,7 +139,7 @@ export async function POST(request: Request) {
         }
         if (intent.kind === 'help') {
             return NextResponse.json<ChatResponse>({
-                reply: 'Mình có thể giúp bạn: tìm cửa hàng gần nhất theo thương hiệu (Circle K, WinMart+, GS25...), lọc cửa hàng 24h hoặc đang mở, tìm theo tiện ích (Wi-Fi, ATM, chuyển khoản...), xem cửa hàng được đánh giá cao nhất, hoặc hướng dẫn dùng các tính năng của web.',
+                reply: 'Mình có thể giúp bạn: tìm cửa hàng gần nhất theo thương hiệu (Circle K, WinMart+, GS25...), lọc cửa hàng 24h hoặc đang mở, tìm theo tiện ích (Wi-Fi, ATM, chuyển khoản...), xem cửa hàng được đánh giá cao nhất, hỏi trạm xe buýt / trạm sạc / cây xăng gần một cửa hàng hoặc một địa chỉ, hoặc hướng dẫn dùng các tính năng của web.',
                 suggestions: DEFAULT_SUGGESTIONS,
             });
         }
@@ -149,6 +165,141 @@ export async function POST(request: Request) {
             return NextResponse.json<ChatResponse>({
                 reply: 'Muốn thêm cửa hàng mới: đăng nhập rồi bấm vào tên tài khoản ở góc phải, chọn "Gửi yêu cầu", điền thông tin cửa hàng và gửi. Admin sẽ duyệt rồi thêm vào bản đồ.',
                 suggestions: DEFAULT_SUGGESTIONS,
+            });
+        }
+
+        if (intent.kind === 'station') {
+            const typeLabel: Record<StationType, string> = {
+                bus: 'Trạm xe buýt',
+                charging: 'Trạm sạc xe điện',
+                gas: 'Cây xăng',
+            };
+            const typeEmoji: Record<StationType, string> = { bus: '🚌', charging: '⚡', gas: '⛽' };
+
+            /* 1) Ưu tiên khớp tên cửa hàng trong câu hỏi — hỏi theo tên
+               cửa hàng là cách hỏi tự nhiên nhất cho thông tin này. So
+               cả tên đầy đủ lẫn tên bỏ tiền tố thương hiệu (ví dụ
+               "hongkong tower" của "WinMart HongKong Tower"). */
+            const msgNorm = normalizeVi(message);
+            const storeRows = await dbAll<{ id: string; name: string; address: string }>(
+                "SELECT id, name, address FROM stores WHERE status = 'ACTIVE'"
+            );
+            const BRAND_HEADS = [
+                'winmart+', 'winmart', 'circle k', 'gs25', 'familymart', 'family mart',
+                '7 eleven', 'agami', 'ohmee', 'ministop', 'tops daily', 'tops',
+            ];
+            type NameCandidate = { id: string; name: string; address: string; score: number };
+            const candidates: NameCandidate[] = [];
+            for (const row of storeRows) {
+                const nname = normalizeVi(row.name);
+                if (!nname) continue;
+                let score = 0;
+                if (msgNorm.includes(nname)) {
+                    score = nname.length;
+                }
+                const parts = nname.split(' ');
+                for (let cut = 1; cut <= 2 && cut < parts.length; cut++) {
+                    if (BRAND_HEADS.includes(parts.slice(0, cut).join(' '))) {
+                        const rest = parts.slice(cut).join(' ');
+                        if (rest.length >= 4 && msgNorm.includes(rest)) {
+                            score = Math.max(score, rest.length);
+                        }
+                    }
+                }
+                if (score > 0) {
+                    candidates.push({ ...row, score });
+                }
+            }
+            candidates.sort((a, b) => b.score - a.score);
+            const bestScore = candidates[0]?.score ?? 0;
+            const best = candidates.filter((c) => c.score === bestScore && c.score > 0);
+            if (best.length === 1) {
+                const store = best[0];
+                const summary = await getStoreStationSummary(store.id);
+                if (summary) {
+                    const lines: string[] = [`Quanh ${store.name} (${store.address}):`];
+                    lines.push(
+                        summary.bus
+                            ? `🚌 Trạm bus gần nhất: ${summary.bus.name} — cách ${formatDistance(summary.bus.distanceMeters)}${summary.bus.routes ? `. Tuyến: ${summary.bus.routes}` : ''}${summary.bus.withinRadius ? '' : ' (trạm gần nhất, ngoài 500 m)'}`
+                            : '🚌 Chưa có dữ liệu trạm bus.'
+                    );
+                    lines.push(
+                        summary.charging
+                            ? `⚡ Trạm sạc gần nhất: ${summary.charging.name} — cách ${formatDistance(summary.charging.distanceMeters)}${summary.charging.operator ? ` (${summary.charging.operator})` : ''}${summary.charging.withinRadius ? '' : ' (trạm gần nhất, ngoài 1 km)'}`
+                            : '⚡ Chưa có dữ liệu trạm sạc.'
+                    );
+                    lines.push(
+                        summary.gas
+                            ? `⛽ Cây xăng gần nhất: ${summary.gas.name} — cách ${formatDistance(summary.gas.distanceMeters)}${summary.gas.operator ? ` (${summary.gas.operator})` : ''}${summary.gas.withinRadius ? '' : ' (cây xăng gần nhất, ngoài 1 km)'}`
+                            : '⛽ Chưa có dữ liệu cây xăng.'
+                    );
+                    return NextResponse.json<ChatResponse>({
+                        reply: lines.join('\n'),
+                        suggestions: STATION_SUGGESTIONS,
+                    });
+                }
+            }
+            if (best.length > 1) {
+                return NextResponse.json<ChatResponse>({
+                    reply: `Có ${best.length} cửa hàng khớp với tên bạn nói: ${best
+                        .slice(0, 3)
+                        .map((c) => c.name)
+                        .join('; ')}. Bạn hỏi cửa hàng nào nhỉ?`,
+                    suggestions: STATION_SUGGESTIONS,
+                });
+            }
+
+            /* 2) Theo điểm: có địa chỉ thì geocode, không thì dùng GPS. */
+            let point: { lat: number; lng: number } | null = null;
+            let pointLabel = '';
+            if (intent.addressText) {
+                /* Địa chỉ có số nhà: thử dạng "<số> đường <tên>" trước —
+                   Nominatim hiểu dạng này đúng phố hơn hẳn dạng trần
+                   "<số> <tên>" (dễ nhầm sang phố khác cùng số nhà). */
+                const houseMatch = intent.addressText.match(/^(\d+)\s+(.+)$/);
+                const queries = houseMatch
+                    ? [`${houseMatch[1]} đường ${houseMatch[2]}`, intent.addressText]
+                    : [intent.addressText];
+                for (const q of queries) {
+                    const geo = await geocodeAddress(q);
+                    if (geo) {
+                        point = { lat: geo.lat, lng: geo.lng };
+                        pointLabel = geo.displayName.split(',').slice(0, 3).join(',');
+                        break;
+                    }
+                }
+            }
+            if (!point && hasLocation) {
+                point = center;
+                pointLabel = 'vị trí của bạn';
+            }
+            if (!point) {
+                return NextResponse.json<ChatResponse>({
+                    reply: intent.addressText
+                        ? `Mình không tìm thấy địa chỉ "${intent.addressText}" trên bản đồ. Bạn thử ghi rõ số nhà + tên đường, hoặc hỏi theo tên cửa hàng (ví dụ: "WinMart ... có gần trạm bus không") nhé.`
+                        : 'Bạn muốn hỏi trạm quanh đâu? Cho mình một địa chỉ hoặc tên cửa hàng, hoặc bật định vị rồi hỏi kiểu "trạm bus gần tôi" nhé.',
+                    suggestions: STATION_SUGGESTIONS,
+                });
+            }
+            const sections: string[] = [];
+            for (const t of intent.types) {
+                const list = await getStationsNearPoint(point.lat, point.lng, t);
+                if (list.length === 0) {
+                    sections.push(`${typeEmoji[t]} Chưa có dữ liệu ${typeLabel[t].toLowerCase()}.`);
+                    continue;
+                }
+                const head = list[0].withinRadius
+                    ? `${typeEmoji[t]} ${typeLabel[t]} quanh ${pointLabel}:`
+                    : `${typeEmoji[t]} Không có ${typeLabel[t].toLowerCase()} nào trong 1 km quanh ${pointLabel} — gần nhất là:`;
+                const items = list.map(
+                    (st) =>
+                        `• ${st.name} — cách ${formatDistance(st.distanceMeters)}${st.routes ? ` (tuyến ${st.routes})` : ''}${st.operator ? ` (${st.operator})` : ''}`
+                );
+                sections.push([head, ...items].join('\n'));
+            }
+            return NextResponse.json<ChatResponse>({
+                reply: sections.join('\n'),
+                suggestions: STATION_SUGGESTIONS,
             });
         }
 
@@ -193,7 +344,20 @@ export async function POST(request: Request) {
                còn phụ thuộc phương tiện di chuyển của người dùng. */
             return NextResponse.json<ChatResponse>({
                 reply: `Tìm thấy ${top.length} cửa hàng ${desc}:`,
-                stores: top.map((s) => toChatStore(s, hasLocation ? center : null)),
+                stores: await Promise.all(
+                    top.map(async (s) => {
+                        const sum = await getStoreStationSummary(s.id);
+                        let stationText: string | undefined;
+                        if (sum) {
+                            const parts: string[] = [];
+                            if (sum.bus) parts.push(`🚌 ${formatDistance(sum.bus.distanceMeters)}`);
+                            if (sum.charging) parts.push(`⚡ ${formatDistance(sum.charging.distanceMeters)}`);
+                            if (sum.gas) parts.push(`⛽ ${formatDistance(sum.gas.distanceMeters)}`);
+                            if (parts.length > 0) stationText = parts.join(' · ');
+                        }
+                        return toChatStore(s, hasLocation ? center : null, stationText);
+                    })
+                ),
                 suggestions: FIND_SUGGESTIONS,
                 mapAction: {
                     label: `Hiện ${top.length} cửa hàng lên bản đồ`,

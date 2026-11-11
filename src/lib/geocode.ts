@@ -27,7 +27,11 @@ export async function geocodeAddress(query: string): Promise<GeocodedLocation | 
         `&viewbox=${HANOI_VIEWBOX}&accept-language=vi` +
         `&q=${encodeURIComponent(hasHanoi ? q : `${q}, Hà Nội, Việt Nam`)}`;
     try {
-        const res = await fetch(url, { headers: { Accept: 'application/json' } });
+        /* Nominatim yêu cầu khai User-Agent rõ ràng; Node fetch mặc
+           định không khai nên phải đặt tay, nếu không dễ bị chặn. */
+        const res = await fetch(url, {
+            headers: { Accept: 'application/json', 'User-Agent': 'convenience-finder/1.0 (BTL student project)' },
+        });
         if (!res.ok) return null;
         const data: unknown = await res.json();
         const first = Array.isArray(data) ? (data[0] as Record<string, unknown> | undefined) : undefined;

@@ -23,7 +23,17 @@ export type ChatIntent =
           district?: string;
           districtName?: string;
       }
+    | {
+          kind: 'station';
+          /* Loại trạm người dùng hỏi tới (có thể nhiều loại cùng lúc). */
+          types: StationType[];
+          /* Phần địa chỉ trích từ câu hỏi (đã gỡ từ khóa trạm + từ đệm);
+             rỗng khi người dùng chỉ nói "gần tôi" / "gần đây". */
+          addressText: string;
+      }
     | { kind: 'fallback' };
+
+export type StationType = 'bus' | 'charging' | 'gas';
 
 /* Bỏ dấu tiếng Việt để so khớp từ khóa: "cửa hàng" -> "cua hang". */
 export function normalizeVi(text: string): string {
@@ -67,6 +77,8 @@ const AMENITY_KEYWORDS: { slug: string; name: string; keys: string[] }[] = [
     { slug: 'medicine', name: 'thuốc cơ bản', keys: ['thuoc'] },
     { slug: 'lottery', name: 'vé số', keys: ['ve so', 'xo so'] },
     { slug: 'ev_charging', name: 'trạm sạc xe điện', keys: ['sac xe dien', 'tram sac'] },
+    { slug: 'near_bus_stop', name: 'gần trạm xe buýt', keys: ['tram bus', 'tram xe buyt'] },
+    { slug: 'near_gas_station', name: 'gần cây xăng', keys: ['cay xang', 'tram xang', 'do xang'] },
 ];
 
 /* Quận/huyện Hà Nội (khóa không dấu để so khớp sau normalizeVi).
@@ -108,6 +120,32 @@ const DISTRICT_KEYWORDS: { key: string; name: string }[] = [
 const hasAny = (text: string, patterns: RegExp[]): boolean => patterns.some((p) => p.test(text));
 const includesAny = (text: string, keys: string[]): boolean => keys.some((k) => text.includes(k));
 
+/* ===== Hỏi thông tin trạm quanh một điểm / một cửa hàng ===== */
+
+/* Từ khóa theo từng loại trạm (đã bỏ dấu). Câu hỏi có các từ này mà
+   KHÔNG nhắc "cửa hàng" thì hiểu là hỏi trạm, không phải tìm cửa hàng
+   (tìm cửa hàng có trạm thì đã có bộ lọc tiện ích ở dưới lo). */
+const STATION_TYPE_KEYS: { type: StationType; keys: string[] }[] = [
+    { type: 'bus', keys: ['tram bus', 'tram xe buyt', 'xe buyt'] },
+    { type: 'charging', keys: ['tram sac', 'sac xe dien'] },
+    { type: 'gas', keys: ['cay xang', 'tram xang', 'do xang'] },
+];
+
+/* Gỡ từ khóa trạm + từ đệm khỏi câu gốc (giữ nguyên dấu để geocode
+   hiểu đúng tên đường) — phần còn lại coi là địa chỉ cần tra. */
+export function extractStationAddress(rawMessage: string): string {
+    return rawMessage
+        .replace(/trạm\s*(bus|xe\s*buýt|sạc|xăng)/gi, ' ')
+        .replace(/cây\s*xăng/gi, ' ')
+        .replace(/xe\s*buýt/gi, ' ')
+        .replace(/sạc\s*xe\s*điện/gi, ' ')
+        .replace(/đổ\s*xăng/gi, ' ')
+        .replace(/\b(xung quanh|gần tôi|gần đây|cho tôi|giúp tôi|ở đâu|khu vực|bán kính|gần|quanh|tìm|có|không|nào|đâu|tôi|mình|đây|ạ|nhé|vậy|thế)\b/gi, ' ')
+        .replace(/[?.!,;]+/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
 export function detectIntent(rawMessage: string): ChatIntent {
     const text = normalizeVi(rawMessage);
     if (!text) {
@@ -136,6 +174,7 @@ export function detectIntent(rawMessage: string): ChatIntent {
         return { kind: 'request-howto' };
     }
 
+
     const brand = BRAND_KEYWORDS.find((b) => includesAny(text, b.keys));
     const amenities = AMENITY_KEYWORDS.filter((a) => includesAny(text, a.keys));
     /* Khớp quận theo ranh giới từ (\\b) — khớp chuỗi con thô sẽ nhận
@@ -144,6 +183,13 @@ export function detectIntent(rawMessage: string): ChatIntent {
     const want24h = hasAny(text, [/\b24\s*h\b/, /24\/7/, /xuyen dem/, /ca dem/]);
     const openOnly = hasAny(text, [/dang mo/, /\bmo cua\b/, /con mo/]);
     const topRated = hasAny(text, [/danh gia cao/, /tot nhat/, /ngon nhat/, /uy tin/, /chat luong/]);
+    /* Hỏi trạm quanh điểm/cửa hàng: có từ khóa trạm nhưng không nhắc
+       "cửa hàng" (nhắc "cửa hàng" thì là tìm cửa hàng kèm lọc tiện ích). */
+    const stationTypes = STATION_TYPE_KEYS.filter((s) => includesAny(text, s.keys)).map((s) => s.type);
+    if (stationTypes.length > 0 && !text.includes('cua hang')) {
+        return { kind: 'station', types: stationTypes, addressText: extractStationAddress(rawMessage) };
+    }
+
     const wantsFind = hasAny(text, [
         /\btim\b/,
         /gan toi/,
@@ -186,12 +232,20 @@ export const DEFAULT_SUGGESTIONS = [
     'Tìm Circle K gần tôi',
     'Cửa hàng 24h',
     'Đánh giá cao nhất',
-    'Chỗ nào có Wi-Fi',
+    'Trạm bus gần tôi',
 ];
 
 export const FIND_SUGGESTIONS = [
     'Tìm WinMart+ gần tôi',
     'Cửa hàng đang mở',
     'Chỗ nào có ATM',
-    'Đánh giá cao nhất',
+    'Cửa hàng gần trạm bus',
+    'Cây xăng gần tôi',
+];
+
+export const STATION_SUGGESTIONS = [
+    'Trạm bus gần tôi',
+    'Cây xăng gần 68 Cầu Giấy',
+    'Cửa hàng gần trạm sạc',
+    'Tìm Circle K gần tôi',
 ];
