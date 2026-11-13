@@ -27,6 +27,14 @@ export type ChatStore = {
     rating: number;
     ratingCount: number;
     distanceText: string;
+    /* Các trường dưới đây để khi người dùng bấm vào thẻ trong chat,
+       trang chính nạp được cửa hàng vào danh sách + bản đồ (sự kiện
+       'finder:bot-select') mà không cần gọi thêm API. */
+    distanceMeters: number;
+    brandId: string;
+    amenities: string[];
+    isOpen: boolean;
+    is24h: boolean;
     openText: string;
     /* Dòng tóm tắt trạm gần nhất (🚌/⚡/⛽ + khoảng cách) — thẻ nào
        cũng có vì luôn tra được trạm gần nhất của cửa hàng. */
@@ -74,6 +82,11 @@ function toChatStore(
         rating: store.rating,
         ratingCount: store.ratingCount ?? 0,
         distanceText: formatDistance(store.distanceMeters),
+        distanceMeters: store.distanceMeters ?? 0,
+        brandId: store.brandId,
+        amenities: store.amenities,
+        isOpen: store.isOpen,
+        is24h: store.is24h,
         openText,
         stationText,
         lat: store.lat,

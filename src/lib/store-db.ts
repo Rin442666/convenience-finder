@@ -3,6 +3,7 @@
 
    Lưu ý: module này chỉ dùng ở phía server (API routes). */
 import { dbAll, dbGet, dbRun } from './db';
+import { normalizeVi } from './chatbot';
 
 export type Brand = {
   id: string;
@@ -669,7 +670,9 @@ async function enrichAndFilterStores(rows: StoreRow[], filters: StoreFilters): P
   } = filters;
 
   const amenityMap = await getAmenitiesByStore(rows.map((row) => row.id));
-  const normalizedSearch = search.trim().toLowerCase();
+  /* Chuẩn hóa bỏ dấu (dùng chung hàm với chatbot) để tìm "cau giay"
+     cũng khớp "Cầu Giấy" trong tên/địa chỉ. */
+  const normalizedSearch = normalizeVi(search);
 
   const voteMap = await getReviewAggregates(rows.map((row) => row.id));
 
@@ -694,8 +697,8 @@ async function enrichAndFilterStores(rows: StoreRow[], filters: StoreFilters): P
     const matchesOpen = !openOnly || store.isOpen || store.is24h;
     const matchesSearch =
       normalizedSearch.length === 0 ||
-      store.name.toLowerCase().includes(normalizedSearch) ||
-      store.address.toLowerCase().includes(normalizedSearch);
+      normalizeVi(store.name).includes(normalizedSearch) ||
+      normalizeVi(store.address).includes(normalizedSearch);
 
     return withinRadius && matchesBrand && matchesAmenity && matchesOpen && matchesSearch;
   });

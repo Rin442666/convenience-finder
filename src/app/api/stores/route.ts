@@ -7,6 +7,7 @@ import {
   queryStores,
   queryStoresFromDatabase,
 } from '@/lib/store-db';
+import { normalizeVi } from '@/lib/chatbot';
 
 /* API trả tối đa bấy nhiêu cửa hàng sau khi sắp xếp — đủ cho UI,
    tránh render hàng trăm thẻ khi DB có hàng nghìn cửa hàng. */
@@ -105,7 +106,7 @@ export async function GET(request: Request) {
             const data = await res.json();
 
             if (data.status === 'OK' && data.results && data.results.length > 0) {
-                const normalizedSearch = search.trim().toLowerCase();
+                const normalizedSearch = normalizeVi(search);
 
                 const stores = applyRatingFilterAndSort<GoogleStoreItem>(
                     data.results
@@ -136,8 +137,8 @@ export async function GET(request: Request) {
                             const matchesOpen = !openOnly || store.isOpen || store.is24h;
                             const matchesSearch =
                                 normalizedSearch.length === 0 ||
-                                store.name.toLowerCase().includes(normalizedSearch) ||
-                                store.address.toLowerCase().includes(normalizedSearch);
+                                normalizeVi(store.name).includes(normalizedSearch) ||
+                                normalizeVi(store.address).includes(normalizedSearch);
 
                             return withinRadius && matchesBrand && matchesAmenity && matchesOpen && matchesSearch;
                         }),

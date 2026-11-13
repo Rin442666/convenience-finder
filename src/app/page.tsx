@@ -8,6 +8,7 @@ import { useApp } from '@/components/app-provider';
 import { useEscapeKey } from '@/hooks/use-escape';
 import { useVoiceInput } from '@/hooks/use-voice-input';
 import { BusStop, ChargingStation, GasStation, Store, UserLocation } from '@/types/store';
+import { normalizeVi } from '@/lib/chatbot';
 
 const fallbackBrandOptions = [
     { id: 'circle-k', name: 'Circle K' },
@@ -97,6 +98,26 @@ function getMobileViewportSnapshot(): boolean {
 }
 
 function getMobileViewportServerSnapshot(): boolean {
+    return false;
+}
+
+/* Nhận diện ô tìm kiếm đang chứa một địa chỉ cụ thể (có số nhà) thay vì
+   từ khóa tên cửa hàng — trường hợp này được geocode lấy làm mốc tìm
+   kiếm. Tên thương hiệu đứng đầu thì vẫn là tìm từ khóa (vd "7 eleven"). */
+function looksLikeAddress(raw: string): boolean {
+    const q = normalizeVi(raw);
+    if (!q) return false;
+    if (/^(circle k|winmart|win mart|gs25|7 eleven|familymart|family mart|agami|ohmee|ministop|tops daily)/.test(q)) {
+        return false;
+    }
+    /* "68 cau giay", "28 ngo 68 cau giay": số nhà ở đầu + từ 2 từ phía sau. */
+    if (/^\d{1,4}([\/-]\d{1,4})?\s+\S+\s+\S+/.test(q)) {
+        return true;
+    }
+    /* "nha 68 duong cau giay", "ngo 68 cau giay": số đi cùng từ chỉ đường/ngõ. */
+    if (/\b(ngo|ngach|hem|duong|pho)\s+\d{1,4}\b/.test(q) || /\b\d{1,4}\s+(ngo|ngach|hem|duong|pho)\b/.test(q)) {
+        return true;
+    }
     return false;
 }
 
@@ -241,6 +262,7 @@ export default function Home() {
         (transcript) => {
             setDraftSearchTerm(transcript);
             setSearchTerm(transcript);
+            setSelectedStore(null);
         },
         (message) => toast(message, 'error')
     );
@@ -259,7 +281,46 @@ export default function Home() {
         draftOpenOnly !== openOnly ||
         draftSelectedAmenities.length !== selectedAmenities.length ||
         draftSelectedAmenities.some((id) => !selectedAmenities.includes(id));
-    const applyFilters = () => {
+    const applyFilters = async () => {
+        /* Áp tìm kiếm/bộ lọc mới: bỏ chọn cửa hàng cũ để tuyến đường và
+           các trạm của cửa hàng cũ biến mất khỏi bản đồ. */
+        setSelectedStore(null);
+        /* Ô tìm kiếm chứa địa chỉ cụ thể (có số nhà): geocode lấy điểm đó
+           làm mốc như chatbot, thay vì so khớp từ khóa — vì địa chỉ lưu
+           trong CSDL hay viết tắt ("Ng. 68 Đ. Cầu Giấy") nên so chuỗi
+           không bao giờ trúng. */
+        const rawSearch = draftSearchTerm.trim();
+        if (looksLikeAddress(rawSearch)) {
+            let geo: { status?: string; lat?: number; lng?: number; displayName?: string } | null = null;
+            try {
+                const res = await fetch(`/api/geocode?q=${encodeURIComponent(rawSearch)}`);
+                geo = res.ok ? await res.json() : { status: 'unreachable' };
+            } catch {
+                geo = { status: 'unreachable' };
+            }
+            if (geo?.status === 'ok' && typeof geo.lat === 'number' && typeof geo.lng === 'number') {
+                setUserLocation({ lat: geo.lat, lng: geo.lng });
+                setPickedLocation(true);
+                setDraftSearchTerm('');
+                setSearchTerm('');
+                setRadius(draftRadius);
+                setSelectedBrand(draftSelectedBrand);
+                setSelectedAmenities(draftSelectedAmenities);
+                setOpenOnly(draftOpenOnly);
+                setSortBy(draftSortBy);
+                setMinRating(draftMinRating);
+                setMobileFiltersOpen(false);
+                const shortName = (geo.displayName || rawSearch).split(',').slice(0, 3).join(',');
+                toast(`Đang tìm quanh địa chỉ: ${shortName}`, 'success');
+                return;
+            }
+            if (geo?.status === 'out_of_area') {
+                toast('Địa chỉ này nằm ngoài phạm vi dữ liệu nội thành Hà Nội.', 'error');
+            } else if (geo?.status === 'unreachable') {
+                toast('Không kết nối được tới OpenStreetMap để tra địa chỉ — đang tìm theo từ khóa như bình thường.', 'error');
+            }
+            /* not_found: im lặng rơi xuống tìm theo từ khóa ở dưới. */
+        }
         setSearchTerm(draftSearchTerm);
         setRadius(draftRadius);
         setSelectedBrand(draftSelectedBrand);
@@ -438,6 +499,45 @@ export default function Home() {
         fetchStores();
     }, [userLocation, radius, selectedBrand, selectedAmenities, openOnly, searchTerm, sortBy, minRating, storesRetryKey]);
 
+    /* Nhận cửa hàng người dùng bấm trong chatbot: nạp đúng danh sách
+       bot vừa tìm được vào khung danh sách và chọn cửa hàng được bấm —
+       tuyến đường + trạm hiện như khi bấm thẻ trong danh sách. */
+    useEffect(() => {
+        const handlePayload = (detail: { stores?: Store[]; storeId?: string } | null) => {
+            if (!detail || !Array.isArray(detail.stores) || detail.stores.length === 0) {
+                return;
+            }
+            /* Hủy hiệu lực các fetch danh sách đang bay để response cũ
+               không ghi đè danh sách của bot. */
+            storesRequestIdRef.current += 1;
+            setIsLoadingStores(false);
+            setFavoritesOnly(false);
+            setStores(detail.stores);
+            const target = detail.stores.find((store) => store.id === detail.storeId) ?? detail.stores[0];
+            setSelectedStore(target);
+            requestAnimationFrame(() => {
+                const el = storeCardRefs.current.get(target.id);
+                if (el) {
+                    el.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'center' });
+                }
+            });
+        };
+        const handler = (event: Event) => {
+            handlePayload((event as CustomEvent<{ stores?: Store[]; storeId?: string }>).detail);
+        };
+        window.addEventListener('finder:bot-select', handler);
+        const pending = sessionStorage.getItem('finder:bot-select');
+        if (pending) {
+            sessionStorage.removeItem('finder:bot-select');
+            try {
+                handlePayload(JSON.parse(pending) as { stores?: Store[]; storeId?: string });
+            } catch {
+                /* Payload hỏng: bỏ qua. */
+            }
+        }
+        return () => window.removeEventListener('finder:bot-select', handler);
+    }, []);
+
     /* Nhận kết quả tìm kiếm từ chatbot: áp bộ lọc rồi cuộn tới danh sách. */
     useEffect(() => {
         const applyDetail = (detail: {
@@ -446,6 +546,8 @@ export default function Home() {
             amenityIds?: string[];
             openOnly?: boolean;
         }) => {
+            /* Chatbot áp tìm kiếm mới: cũng bỏ chọn cửa hàng cũ trên bản đồ. */
+            setSelectedStore(null);
             if (detail.search !== undefined) {
                 setDraftSearchTerm(detail.search);
                 setSearchTerm(detail.search);
@@ -676,6 +778,7 @@ export default function Home() {
                         <div className="relative">
                             <input
                                 value={draftSearchTerm}
+                                onFocus={() => setDraftSearchTerm('')}
                                 onChange={(e) => setDraftSearchTerm(e.target.value)}
                                 placeholder="Tên cửa hàng, địa chỉ... (bấm mic để nói)"
                                 className="w-full border border-gray-200 dark:border-gray-700 rounded-lg px-3 py-2 pr-10 text-sm text-gray-800 dark:text-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-200 dark:focus:ring-blue-800"

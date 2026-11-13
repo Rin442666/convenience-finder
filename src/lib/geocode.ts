@@ -17,10 +17,17 @@ function toNumber(value: unknown): number | null {
     return Number.isFinite(n) ? n : null;
 }
 
-/* Địa chỉ văn bản → tọa độ. Tự thêm "Hà Nội" nếu câu nhập chưa có. */
-export async function geocodeAddress(query: string): Promise<GeocodedLocation | null> {
+export type GeocodeOutcome =
+    | { status: 'ok'; location: GeocodedLocation }
+    | { status: 'not_found' }
+    | { status: 'unreachable' };
+
+/* Địa chỉ văn bản → tọa độ, kèm trạng thái để phân biệt "không tìm thấy
+   địa chỉ" với "không kết nối được tới OpenStreetMap" (mất mạng/timeout/
+   Nominatim lỗi). Tự thêm "Hà Nội" nếu câu nhập chưa có. */
+export async function geocodeAddressDetailed(query: string): Promise<GeocodeOutcome> {
     const q = query.trim();
-    if (!q) return null;
+    if (!q) return { status: 'not_found' };
     const hasHanoi = /hà nội|ha noi|hanoi/i.test(q);
     const url =
         `${NOMINATIM}/search?format=json&limit=1&countrycodes=vn` +
@@ -32,16 +39,22 @@ export async function geocodeAddress(query: string): Promise<GeocodedLocation | 
         const res = await fetch(url, {
             headers: { Accept: 'application/json', 'User-Agent': 'convenience-finder/1.0 (BTL student project)' },
         });
-        if (!res.ok) return null;
+        if (!res.ok) return { status: 'unreachable' };
         const data: unknown = await res.json();
         const first = Array.isArray(data) ? (data[0] as Record<string, unknown> | undefined) : undefined;
         const lat = toNumber(first?.lat);
         const lng = toNumber(first?.lon);
-        if (lat === null || lng === null) return null;
-        return { lat, lng, displayName: String(first?.display_name ?? q) };
+        if (lat === null || lng === null) return { status: 'not_found' };
+        return { status: 'ok', location: { lat, lng, displayName: String(first?.display_name ?? q) } };
     } catch {
-        return null;
+        return { status: 'unreachable' };
     }
+}
+
+/* Địa chỉ văn bản → tọa độ. Tự thêm "Hà Nội" nếu câu nhập chưa có. */
+export async function geocodeAddress(query: string): Promise<GeocodedLocation | null> {
+    const outcome = await geocodeAddressDetailed(query);
+    return outcome.status === 'ok' ? outcome.location : null;
 }
 
 /* Tọa độ → địa chỉ văn bản (tiếng Việt). */

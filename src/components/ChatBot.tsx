@@ -20,9 +20,13 @@ type Message = {
 const GREETING =
     'Chào bạn! Mình là trợ lý tìm cửa hàng tiện lợi. Bạn thử hỏi mình: "tìm Circle K gần tôi", "cửa hàng 24h", hay "chỗ nào có Wi-Fi" nhé.';
 
-function StoreCard({ store, onDirections }: { store: ChatStore; onDirections: (store: ChatStore) => void }) {
+function StoreCard({ store, onDirections, onSelect }: { store: ChatStore; onDirections: (store: ChatStore) => void; onSelect: (store: ChatStore) => void }) {
     return (
-        <div className="mt-2 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-3">
+        <div
+            onClick={() => onSelect(store)}
+            title="Bấm để hiện cửa hàng này trên bản đồ"
+            className="mt-2 cursor-pointer rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-3 transition hover:border-blue-300 dark:hover:border-blue-700"
+        >
             <div className="flex items-start justify-between gap-2">
                 <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">{store.name}</p>
                 {store.brandName && (
@@ -60,7 +64,10 @@ function StoreCard({ store, onDirections }: { store: ChatStore; onDirections: (s
             )}
             <button
                 type="button"
-                onClick={() => onDirections(store)}
+                onClick={(e) => {
+                    e.stopPropagation();
+                    onDirections(store);
+                }}
                 className="mt-2 inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-700"
             >
                 <Navigation className="h-3.5 w-3.5" />
@@ -267,6 +274,37 @@ export default function ChatBot() {
         }, 80);
     };
 
+    /* Bấm vào một thẻ cửa hàng trong chat: gửi toàn bộ danh sách bot
+       vừa tìm được + cửa hàng được bấm sang trang chính (sự kiện
+       'finder:bot-select') để nạp vào khung danh sách và chọn cửa hàng
+       đó trên bản đồ. Ở trang khác thì lưu sessionStorage rồi về '/'. */
+    const selectStoreOnMap = (stores: ChatStore[], store: ChatStore) => {
+        const payload = {
+            storeId: store.id,
+            stores: stores.map((s) => ({
+                id: s.id,
+                brandId: s.brandId,
+                name: s.name,
+                address: s.address,
+                lat: s.lat,
+                lng: s.lng,
+                rating: s.rating,
+                ratingCount: s.ratingCount,
+                isOpen: s.isOpen,
+                is24h: s.is24h,
+                amenities: s.amenities,
+                distanceMeters: s.distanceMeters,
+            })),
+        };
+        if (pathname === '/') {
+            window.dispatchEvent(new CustomEvent('finder:bot-select', { detail: payload }));
+        } else {
+            sessionStorage.setItem('finder:bot-select', JSON.stringify(payload));
+            router.push('/');
+        }
+        setOpen(false);
+    };
+
     const applyMapAction = (action: ChatMapAction) => {
         const payload = JSON.stringify(action);
         if (pathname === '/') {
@@ -340,7 +378,7 @@ export default function ChatBot() {
                                             </button>
                                         </div>
                                         {msg.stores?.map((store) => (
-                                            <StoreCard key={store.id} store={store} onDirections={setDirectionsStore} />
+                                            <StoreCard key={store.id} store={store} onDirections={setDirectionsStore} onSelect={(s) => selectStoreOnMap(msg.stores ?? [], s)} />
                                         ))}
                                         {msg.mapAction && (
                                             <button
